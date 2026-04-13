@@ -1,68 +1,55 @@
-// src/whatsapp/whatsapp.service.ts
-import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import axios from 'axios';
-import { Subject } from 'rxjs';
 
 @Injectable()
 export class WhatsappService {
-  private readonly logger = new Logger(WhatsappService.name);
-  private readonly apiUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
-  private readonly apiKey = process.env.EVOLUTION_API_KEY;
-  private readonly instanceName = process.env.EVOLUTION_INSTANCE_NAME;
-
-  // Canal de eventos em tempo real para o Frontend
-  private messageStream = new Subject<any>();
-  get messageStream$() {
-    return this.messageStream.asObservable();
-  }
-
-  // 1. ENVIAR MENSAGEM (O que já tínhamos)
   async sendText(number: string, text: string) {
+    // Puxa as variáveis e limpa espaços vazios ou barras acidentais
+    const apiUrl = (process.env.EVOLUTION_API_URL || '').trim().replace(/\/$/, '');
+    const apiKey = (process.env.EVOLUTION_API_KEY || '').trim();
+    const instanceName = (process.env.EVOLUTION_INSTANCE_NAME || '').trim();
+
+    // Remove qualquer coisa que não seja número (ex: +, -, espaços)
     const cleanNumber = number.replace(/\D/g, '');
-    const endpoint = `${this.apiUrl}/message/sendText/${this.instanceName}`;
+    const endpoint = `${apiUrl}/message/sendText/${instanceName}`;
+
+    console.log('\n--- 🔴 INICIANDO TENTATIVA DE ENVIO ---');
+    console.log(`📍 Destino (Endpoint): ${endpoint}`);
+    console.log(`📱 Número Formatado: ${cleanNumber}`);
+    console.log(`🔑 Tamanho da API Key: ${apiKey.length} caracteres`);
 
     try {
       const response = await axios.post(
         endpoint,
-        { number: cleanNumber, text: text, delay: 1000, linkPreview: true },
-        { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } }
+        {
+          number: cleanNumber,
+          text: text
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': apiKey
+          }
+        }
       );
-      return { success: true, messageId: response.data?.key?.id };
-    } catch (error: any) {
-      throw new HttpException(
-        error.response?.data?.message || 'Falha ao enviar',
-        error.response?.status || HttpStatus.BAD_GATEWAY,
-      );
-    }
-  }
 
-  // 2. RECEBER MENSAGEM (Processar o Webhook da Evolution API v2)
-  processWebhook(payload: any) {
-    // A Evolution API v2 envia o evento 'messages.upsert' quando há uma nova mensagem
-    if (payload.event === 'messages.upsert' && payload.data) {
-      const msgData = payload.data;
+      console.log('✅ SUCESSO! A Evolution aceitou a mensagem.');
+      console.log('--- FIM DA TENTATIVA ---\n');
       
-      // Ignorar mensagens que nós mesmos enviamos
-      if (msgData.key.fromMe) return;
+      return response.data;
+      
+    } catch (error: any) {
+      console.log('❌ FALHA NA EVOLUTION API. Motivo exato:');
+      
+      // Isto vai imprimir o erro exato que a Evolution está a devolver!
+      const erroExato = error.response?.data || error.message;
+      console.dir(erroExato, { depth: null, colors: true });
+      console.log('--- FIM DA TENTATIVA ---\n');
 
-      // Extrair o texto (suporta texto simples ou resposta a outra mensagem)
-      const text = msgData.message?.conversation || msgData.message?.extendedTextMessage?.text;
-      if (!text) return; // Ignora áudios/imagens por agora
-
-      const senderNumber = msgData.key.remoteJid.replace('@s.whatsapp.net', '');
-      const pushName = msgData.pushName || 'Cliente';
-
-      this.logger.log(`Nova mensagem recebida de ${pushName} (${senderNumber})`);
-
-      // Transmite a mensagem para o Frontend conectado
-      this.messageStream.next({
-        id: msgData.key.id,
-        text: text,
-        from: senderNumber,
-        pushName: pushName,
-        type: 'received',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      });
+      throw new HttpException(
+        error.response?.data?.message || 'Falha na Evolution API',
+        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 }
