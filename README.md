@@ -1,85 +1,117 @@
 # CRM Backend
 
-Backend do projeto CRM, desenvolvido com NestJS, Node.js e TypeScript.
+Backend do CRM desenvolvido com [NestJS](https://nestjs.com/) e [Prisma ORM](https://www.prisma.io/) conectado a um banco PostgreSQL hospedado em ambiente EasyPanel.
 
-## Tecnologias utilizadas
+---
 
-- NestJS
+## **Tecnologias**
+
 - Node.js
-- TypeScript
-- Docker
-- EasyPanel
+- NestJS
+- Prisma ORM
+- PostgreSQL
 
-## Objetivo
+---
 
-Este projeto é responsável pela API do CRM, fornecendo rotas para integração com o frontend e, futuramente, autenticação, cadastro de clientes e integração com banco de dados.
+## **Estrutura de Pastas**
 
-## Como rodar localmente
-
-Instale as dependências:
-
-```bash
-npm install
+```
+crm-backend/
+├─ src/
+│  ├─ app.controller.ts
+│  ├─ app.service.ts
+│  ├─ prisma/
+│  │   ├─ prisma.module.ts
+│  │   └─ prisma.service.ts
+│      ├─ customers.controller.ts
+│      ├─ customers.service.ts
+│      └─ customers.module.ts
+├─ .env
+├─ tsconfig.json
+└─ README.md
 ```
 
-Inicie em modo desenvolvimento:
+---
 
-```bash
-npm run start:dev
-```
+## **Configuração do Banco de Dados e Prisma**
 
-O backend ficará disponível em:
+- **Arquivo `.env`:**
+  ```env
+  DATABASE_URL="postgresql://USUARIO:SENHA@HOST:PORTA/NOME_DO_BANCO?schema=public&sslmode=disable"
+  ```
+  > Exemplo real pode ser:
+  > `postgresql://crmpost:minhasenhasegura@painel.testevictor.site:55432/crm?schema=public&sslmode=disable`
 
-```text
-http://localhost:3001
-```
+- **Configuração do prisma:** (`prisma/schema.prisma`)
+  ```prisma
+  generator client {
+    provider = "prisma-client-js"
+    output   = "../generated/prisma"
+  }
 
-## Variáveis de ambiente
+  datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+# CRM Backend
+  }
 
-Atualmente o backend pode utilizar:
+  model Customer {
+    name      String
+    email     String   @unique
+    phone     String?
 
-```env
-PORT=3001
-```
 
-Em produção, essa variável pode ser configurada no EasyPanel.
+## **Setup e scripts**
 
-## Endpoints atuais
+1. Instale as dependências:
+    ```bash
+    npm install
+    ```
 
-### GET /
-Retorna mensagem simples confirmando que o backend está funcionando.
+2. Gere o Prisma Client:
+    ```bash
+    npx prisma generate
+    ```
 
-### GET /health
-Retorna status da aplicação.
+3. Rode as migrations (caso necessário):
+    ```bash
+    npx prisma migrate dev --name init
+    ```
 
-## Build de produção
+4. Inicie a aplicação em dev:
+    ```bash
+    npm run start:dev
+    ```
+    Ou para produção:
+    ```bash
+    npm run build
+    npm run start:prod
+    ```
+---
 
-```bash
-npm run build
-npm run start:prod
-```
+## **Endpoints disponíveis**
 
-## Deploy
+- `POST /customers` — Criar cliente
+- `GET /customers` — Listar todos os clientes
+- `GET /customers/:id` — Buscar cliente por ID
+- `PATCH /customers/:id` — Atualizar dados do cliente
+- `DELETE /customers/:id` — Remover cliente
 
-O deploy está sendo feito no EasyPanel.
+---
 
-### Variáveis de ambiente usadas em produção
+## **Deploy no EasyPanel**
 
-- `PORT`
+- Faça o push deste projeto para o GitHub.
+- No EasyPanel, conecte seu repositório e defina as variáveis de ambiente conforme `.env`.
+- Certifique-se que a porta exposta no app é a desejada (ex: 3000).
+- O container executará a aplicação com base no `package.json`.
 
-## Estrutura inicial
+---
 
-- `src/main.ts`: inicialização da aplicação
-- `src/app.module.ts`: módulo principal
-- `src/app.controller.ts`: rotas iniciais
-- `src/app.service.ts`: regras básicas
+## **Observações**
 
-## Status atual
+- O Prisma Client é gerado fora da pasta `src` por padrão.
+- Caso edite o `schema.prisma`, **sempre rode** o comando `npx prisma generate`.
+- Senhas e URLs de acesso NÃO devem ser expostas publicamente.
 
-- [x] Projeto criado
-- [x] Backend publicado no EasyPanel
-- [x] Endpoint `/` funcionando
-- [x] Endpoint `/health` funcionando
-- [ ] Configurar banco de dados
-- [ ] Criar autenticação
-- [ ] Criar módulo de clientes
+---
