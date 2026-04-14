@@ -51,5 +51,10 @@ model Message {
   contact       Contact  @relation(fields: [contactNumber], references: [number])
   text          String   @db.Text
   type          String   
+  // NOVOS CAMPOS PARA MÍDIA:
+  isMedia       Boolean  @default(false)
+  mediaData     String?  @db.Text // Guardará o Base64 da imagem/documento
+  mimeType      String?           // Ex: image/png, application/pdf
+  fileName      String?           // Ex: relatorio.pdf
   timestamp     DateTime @default(now())
 }

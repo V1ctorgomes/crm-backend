@@ -140,6 +140,57 @@ export class WhatsappService {
   }
 
   // ==========================================
+  // ENVIAR MÍDIAS (IMAGENS, PDFS, ETC)
+  // ==========================================
+  async sendMedia(number: string, base64Data: string, fileName: string, mimeType: string, caption: string) {
+    const cleanNumber = number.replace(/\D/g, '');
+    const endpoint = `${this.apiUrl}/message/sendMedia/${this.instanceName}`;
+    
+    // O Frontend envia "data:image/png;base64,iVBORw0..." - precisamos separar
+    const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+    
+    // Define o tipo para a Evolution API
+    let mediatype = 'document';
+    if (mimeType.startsWith('image')) mediatype = 'image';
+    else if (mimeType.startsWith('video')) mediatype = 'video';
+    else if (mimeType.startsWith('audio')) mediatype = 'audio';
+
+    try {
+      const response = await axios.post(
+        endpoint,
+        {
+          number: cleanNumber,
+          mediatype: mediatype,
+          mimetype: mimeType,
+          caption: caption,
+          media: cleanBase64,
+          fileName: fileName
+        },
+        { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } }
+      );
+
+      // Salva a mídia enviada no nosso Banco de Dados
+      await this.prisma.message.create({
+        data: {
+          contactNumber: cleanNumber,
+          text: caption,
+          type: 'sent',
+          isMedia: true,
+          mediaData: base64Data, // Guardamos o original com o "data:..." para o Frontend conseguir exibir
+          mimeType: mimeType,
+          fileName: fileName,
+          timestamp: new Date()
+        }
+      });
+
+      return { success: true, messageId: response.data?.key?.id };
+    } catch (error: any) {
+      this.logger.error(`❌ FALHA AO ENVIAR MÍDIA:`, error.response?.data || error.message);
+      throw new HttpException('Falha na API ao enviar mídia', HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  // ==========================================
   // MÉTODOS DE BUSCA (API)
   // ==========================================
   async getContacts() {
@@ -148,10 +199,29 @@ export class WhatsappService {
     });
   }
 
+ // ==========================================
+  // BUSCAR HISTÓRICO COMPLETO (COM MÍDIA)
+  // ==========================================
   async getChatHistory(number: string) {
     return this.prisma.message.findMany({
-      where: { contactNumber: number },
-      orderBy: { timestamp: 'asc' },
+      where: { 
+        contactNumber: number 
+      },
+      orderBy: { 
+        timestamp: 'asc' 
+      },
+      // Selecionamos explicitamente os novos campos de mídia para o Frontend
+      select: { 
+        id: true, 
+        text: true, 
+        type: true, 
+        timestamp: true, 
+        isMedia: true, 
+        mediaData: true, 
+        mimeType: true, 
+        fileName: true, 
+        contactNumber: true 
+      }
     });
   }
 }

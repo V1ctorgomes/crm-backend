@@ -15,6 +15,17 @@ export class WhatsappController {
     return this.whatsappService.sendText(body.number, body.text);
   }
 
+  @Post('send-media')
+  async sendMedia(@Body() body: { number: string; base64Data: string; fileName: string; mimeType: string; caption?: string }) {
+    return this.whatsappService.sendMedia(
+      body.number, 
+      body.base64Data, 
+      body.fileName, 
+      body.mimeType, 
+      body.caption || ''
+    );
+  }
+
   @Post('webhook')
   @HttpCode(200)
   receiveWebhook(@Body() body: any) {
@@ -37,8 +48,10 @@ export class WhatsappController {
     return this.whatsappService.getContacts();
   }
 
-  @Get('history/:number')
-  async getHistory(@Param('number') number: string) {
-    return this.whatsappService.getChatHistory(number);
-  }
+ @Get('history/:number')
+async getHistory(@Param('number') number: string) {
+  // Ela chama a função do service que agora busca as mídias
+  return this.whatsappService.getChatHistory(number);
+}
+
 }
