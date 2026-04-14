@@ -8,7 +8,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// NOVO: Modelo de Utilizador (Para o Login funcionar)
+// ==========================================
+// AS SUAS TABELAS ORIGINAIS (COMPLETAS)
+// ==========================================
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -20,7 +22,6 @@ model User {
   @@map("users")
 }
 
-// O seu modelo original de Clientes
 model Customer {
   id        String   @id @default(uuid())
   name      String
@@ -31,7 +32,9 @@ model Customer {
   updatedAt DateTime @updatedAt
 }
 
-
+// ==========================================
+// AS NOSSAS NOVAS TABELAS DO WHATSAPP
+// ==========================================
 model Contact {
   number            String    @id
   name              String?
