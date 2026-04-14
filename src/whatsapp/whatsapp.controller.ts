@@ -1,28 +1,42 @@
-import { Controller, Post, Body, Get, Param, Sse, MessageEvent, HttpCode } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Sse, MessageEvent, HttpCode, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { WhatsappService } from './whatsapp.service';
+import { R2Service } from './r2.service';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import 'multer';
 
 @Controller('whatsapp')
 export class WhatsappController {
-  constructor(private readonly whatsappService: WhatsappService) {}
+  constructor(
+    private readonly whatsappService: WhatsappService,
+    private readonly r2Service: R2Service // Injetado o novo serviço da Cloudflare
+  ) {}
 
-  // ==========================================
-  // ROTAS DE CHAT AO VIVO
-  // ==========================================
   @Post('send')
   async sendMessage(@Body() body: { number: string; text: string }) {
     return this.whatsappService.sendText(body.number, body.text);
   }
 
   @Post('send-media')
-  async sendMedia(@Body() body: { number: string; base64Data: string; fileName: string; mimeType: string; caption?: string }) {
+  @UseInterceptors(FileInterceptor('file')) // Intercepta o arquivo real vindo do frontend
+  async sendMedia(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('number') number: string,
+    @Body('caption') caption: string,
+  ) {
+    if (!file) throw new BadRequestException('Nenhum arquivo enviado.');
+    
+    // 1. Envia para o Cloudflare R2 e pega a URL limpa
+    const publicUrl = await this.r2Service.uploadFile(file);
+
+    // 2. Envia a URL para a Evolution API e salva no Banco de Dados
     return this.whatsappService.sendMedia(
-      body.number, 
-      body.base64Data, 
-      body.fileName, 
-      body.mimeType, 
-      body.caption || ''
+      number, 
+      publicUrl, 
+      file.originalname, 
+      file.mimetype, 
+      caption || ''
     );
   }
 
@@ -40,18 +54,13 @@ export class WhatsappController {
     );
   }
 
-  // ==========================================
-  // ROTAS DE BANCO DE DADOS (NOVAS)
-  // ==========================================
   @Get('contacts')
   async getContacts() {
     return this.whatsappService.getContacts();
   }
 
- @Get('history/:number')
-async getHistory(@Param('number') number: string) {
-  // Ela chama a função do service que agora busca as mídias
-  return this.whatsappService.getChatHistory(number);
-}
-
+  @Get('history/:number')
+  async getHistory(@Param('number') number: string) {
+    return this.whatsappService.getChatHistory(number);
+  }
 }
