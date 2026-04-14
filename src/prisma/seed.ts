@@ -1,5 +1,5 @@
 // O '../' sobe para 'src', o outro '../' sobe para a raiz, e depois entra em 'generated'
-import { PrismaClient } from '../../generated/prisma'; 
+import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
