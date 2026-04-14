@@ -1,7 +1,7 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Subject } from 'rxjs';
-import { PrismaService } from '../prisma/prisma.service'; // Confirme se este caminho está correto no seu projeto
+import { PrismaService } from '../prisma/prisma.service'; // Confirme se o caminho está certo para o seu projeto
 
 @Injectable()
 export class WhatsappService {
@@ -17,6 +17,25 @@ export class WhatsappService {
   constructor(private prisma: PrismaService) {}
 
   // ==========================================
+  // NOVA FUNÇÃO: FORÇAR A BUSCA DA FOTO
+  // ==========================================
+  private async fetchProfilePicture(number: string): Promise<string | undefined> {
+    try {
+      const endpoint = `${this.apiUrl}/chat/fetchProfilePictureUrl/${this.instanceName}`;
+      const response = await axios.post(
+        endpoint,
+        { number: number },
+        { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } }
+      );
+      // Retorna o link da foto do WhatsApp
+      return response.data?.profilePictureUrl || undefined;
+    } catch (error) {
+      // Se a pessoa não tiver foto ou ocultar nas configurações de privacidade do WhatsApp
+      return undefined;
+    }
+  }
+
+  // ==========================================
   // RECEBER E SALVAR NO BANCO DE DADOS
   // ==========================================
   async processWebhook(payload: any) {
@@ -30,15 +49,23 @@ export class WhatsappService {
     const incomingText = msgData.message?.conversation || msgData.message?.extendedTextMessage?.text || "📷 Mídia/Documento";
     const isFromMe = msgData.key?.fromMe || false;
     const pushName = msgData.pushName || contactNumber;
-    const picUrl = msgData.profilePictureUrl || undefined;
+    let picUrl = msgData.profilePictureUrl || undefined;
 
     try {
+      // Verifica se o contato já existe no nosso banco de dados
+      const existingContact = await this.prisma.contact.findUnique({ where: { number: contactNumber } });
+
+      // 🚨 A MAGIA ACONTECE AQUI: Se a Evolution não enviou a foto E nós ainda não a temos no Banco...
+      if (!picUrl && (!existingContact || !existingContact.profilePictureUrl)) {
+        picUrl = await this.fetchProfilePicture(contactNumber);
+      }
+
       // 1. Atualiza o Contato e a Foto
       const contact = await this.prisma.contact.upsert({
         where: { number: contactNumber },
         update: { 
           name: pushName, 
-          // Só atualiza a foto se a Evolution mandar uma nova
+          // Só atualiza a foto se a API encontrou uma
           ...(picUrl && { profilePictureUrl: picUrl }),
           lastMessage: incomingText,
           lastMessageTime: new Date()
@@ -62,6 +89,10 @@ export class WhatsappService {
       });
 
       // 3. Avisa a tela (Frontend) que chegou mensagem
+      // Injetamos a foto recém-descoberta no payload para a tela do CRM mostrar imediatamente
+      if (picUrl) {
+         payload.data.profilePictureUrl = picUrl; 
+      }
       this.messageSubject.next({ data: payload });
       
     } catch (e) {
@@ -87,7 +118,6 @@ export class WhatsappService {
         { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } }
       );
 
-      // Salva a mensagem que nós enviamos no Banco de Dados
       await this.prisma.message.create({
         data: {
           contactNumber: cleanNumber,
@@ -97,11 +127,10 @@ export class WhatsappService {
         }
       });
 
-      // Atualiza o contato para ele subir no menu lateral
       await this.prisma.contact.update({
         where: { number: cleanNumber },
         data: { lastMessage: text, lastMessageTime: new Date() }
-      }).catch(() => null); // Ignora se o contato não existir ainda
+      }).catch(() => null);
 
       return { success: true, messageId: response.data?.key?.id };
     } catch (error: any) {
