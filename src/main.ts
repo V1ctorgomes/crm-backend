@@ -11,10 +11,12 @@ async function bootstrap() {
   app.use(urlencoded({ limit: '20mb', extended: true }));
 
   // Habilita o CORS para que o seu Frontend (Next.js) consiga comunicar com o Backend
+  // Habilita o CORS de forma total
   app.enableCors({
-    origin: '*', // Em produção, você pode substituir pelo domínio real do seu frontend
+    origin: true, // Permite qualquer origem que venha do navegador
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
+    allowedHeaders: 'Content-Type, Accept, Authorization, apikey',
   });
 
   // Escuta na porta definida pelo ambiente (Easypanel/Heroku) ou 3001 localmente
