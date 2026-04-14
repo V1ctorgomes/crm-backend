@@ -1,14 +1,32 @@
 generator client {
   provider = "prisma-client-js"
+  // Adicione esta linha de volta se ela estava no seu projeto original!
+  output   = "../generated/prisma" 
 }
 
 datasource db {
-  provider = "postgresql" // Mude para "mysql" ou "sqlite" se for o caso do seu servidor
+  provider = "postgresql" // ou o que estava antes
   url      = env("DATABASE_URL")
 }
 
+// ==========================================
+// AS SUAS TABELAS ORIGINAIS (MANTENHA-AS AQUI)
+// ==========================================
+model User {
+  id    Int     @default(autoincrement()) @id
+  // ... resto dos campos do User
+}
+
+model Customer {
+  id    Int     @default(autoincrement()) @id
+  // ... resto dos campos do Customer
+}
+
+// ==========================================
+// AS NOSSAS NOVAS TABELAS DO WHATSAPP (COLE NO FUNDO)
+// ==========================================
 model Contact {
-  number            String    @id // Ex: 558598475755
+  number            String    @id
   name              String?
   profilePictureUrl String?
   lastMessage       String?
@@ -22,6 +40,6 @@ model Message {
   contactNumber String
   contact       Contact  @relation(fields: [contactNumber], references: [number])
   text          String   @db.Text
-  type          String   // "sent" ou "received"
+  type          String   
   timestamp     DateTime @default(now())
 }
