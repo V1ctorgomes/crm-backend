@@ -1,16 +1,4 @@
-import { 
-  Controller, 
-  Post, 
-  Body, 
-  Get, 
-  Param, 
-  Sse, 
-  MessageEvent, 
-  HttpCode, 
-  UploadedFile, 
-  UseInterceptors, 
-  BadRequestException 
-} from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Sse, MessageEvent, HttpCode, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { WhatsappService } from './whatsapp.service';
 import { R2Service } from './r2.service';
@@ -21,7 +9,7 @@ import { map } from 'rxjs/operators';
 export class WhatsappController {
   constructor(
     private readonly whatsappService: WhatsappService,
-    private readonly r2Service: R2Service // Serviço da Cloudflare injetado
+    private readonly r2Service: R2Service
   ) {}
 
   @Post('send')
@@ -31,19 +19,17 @@ export class WhatsappController {
   }
 
   @Post('send-media')
-  @UseInterceptors(FileInterceptor('file')) // Intercepta o ficheiro vindo do frontend
+  @UseInterceptors(FileInterceptor('file'))
   async sendMedia(
     @UploadedFile() file: Express.Multer.File,
     @Body('number') number: string,
     @Body('caption') caption: string,
   ) {
-    if (!file) throw new BadRequestException('Nenhum ficheiro enviado.');
-    if (!number) throw new BadRequestException('O número do contacto é obrigatório.');
+    if (!file) throw new BadRequestException('Nenhum arquivo enviado.');
+    if (!number) throw new BadRequestException('O número do contato é obrigatório.');
     
-    // 1. Envia para o Cloudflare R2 passando o "number" para criar a pasta do cliente
     const publicUrl = await this.r2Service.uploadFile(file, number);
 
-    // 2. Envia a URL para a Evolution API e guarda no Banco de Dados
     return this.whatsappService.sendMedia(
       number, 
       publicUrl, 
