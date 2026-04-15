@@ -1,6 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto'; // <-- Usando o gerador nativo do Node.js!
 import 'multer';
 
 @Injectable()
@@ -10,7 +10,6 @@ export class R2Service {
   constructor() {
     this.s3Client = new S3Client({
       region: 'auto',
-      // Colocamos o "!" no final para garantir ao TypeScript que a variável existe
       endpoint: process.env.R2_ENDPOINT!,
       credentials: {
         accessKeyId: process.env.R2_ACCESS_KEY_ID!,
@@ -27,10 +26,11 @@ export class R2Service {
         .replace(/[^a-zA-Z0-9]/g, "-")
         .toLowerCase();
 
-      const uniqueKey = `${uuidv4()}-${cleanName}.${fileExtension}`;
+      // randomUUID() substitui o antigo uuidv4()
+      const uniqueKey = `${randomUUID()}-${cleanName}.${fileExtension}`;
 
       const command = new PutObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME!, // Colocado o "!" aqui também
+        Bucket: process.env.R2_BUCKET_NAME!,
         Key: uniqueKey,
         Body: file.buffer,
         ContentType: file.mimetype,
