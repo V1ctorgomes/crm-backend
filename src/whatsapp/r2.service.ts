@@ -1,6 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { randomUUID } from 'crypto'; // <-- Usando o gerador nativo do Node.js!
+import { randomUUID } from 'crypto';
 import 'multer';
 
 @Injectable()
@@ -18,7 +18,8 @@ export class R2Service {
     });
   }
 
-  async uploadFile(file: Express.Multer.File): Promise<string> {
+  // AGORA RECEBE O "folderName" (que será o número do cliente)
+  async uploadFile(file: Express.Multer.File, folderName: string): Promise<string> {
     try {
       const fileExtension = file.originalname.split('.').pop();
       const cleanName = file.originalname
@@ -26,8 +27,11 @@ export class R2Service {
         .replace(/[^a-zA-Z0-9]/g, "-")
         .toLowerCase();
 
-      // randomUUID() substitui o antigo uuidv4()
-      const uniqueKey = `${randomUUID()}-${cleanName}.${fileExtension}`;
+      // Limpa o nome da pasta (garante que tem apenas números)
+      const cleanFolder = folderName.replace(/\D/g, '');
+
+      // A MÁGICA ACONTECE AQUI: Adicionamos o "cleanFolder/" no início!
+      const uniqueKey = `${cleanFolder}/${randomUUID()}-${cleanName}.${fileExtension}`;
 
       const command = new PutObjectCommand({
         Bucket: process.env.R2_BUCKET_NAME!,
