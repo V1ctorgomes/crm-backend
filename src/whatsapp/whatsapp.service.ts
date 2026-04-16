@@ -42,7 +42,6 @@ export class WhatsappService {
     const msg = msgData.message;
     let incomingText: string = msg?.conversation || msg?.extendedTextMessage?.text || "";
 
-    // Tipagem explícita para o TypeScript não reclamar
     let mediaUrl: string | undefined;
     let mimeType: string | undefined;
     let fileName: string | undefined;
@@ -59,7 +58,6 @@ export class WhatsappService {
         const base64Data = response.data?.base64;
 
         if (base64Data) {
-          // Variáveis locais 100% garantidas como "string" para a função uploadBuffer
           const finalMimeType: string = mediaObject.mimetype?.split(';')[0] || 'application/octet-stream';
           const fileExt: string = finalMimeType.split('/')[1] || 'bin';
           
@@ -69,11 +67,8 @@ export class WhatsappService {
           }
 
           const buffer = Buffer.from(base64Data, 'base64');
-          
-          // Agora passamos variáveis que o TypeScript SABE que são string
           mediaUrl = await this.r2Service.uploadBuffer(buffer, finalFileName, finalMimeType, contactNumber);
 
-          // Atualizamos as variáveis externas para salvar no banco
           mimeType = finalMimeType;
           fileName = finalFileName;
           incomingText = mediaObject.caption || ""; 
@@ -168,5 +163,22 @@ export class WhatsappService {
       where: { contactNumber: number }, orderBy: { timestamp: 'asc' },
       select: { id: true, text: true, type: true, timestamp: true, isMedia: true, mediaData: true, mimeType: true, fileName: true, contactNumber: true }
     });
+  }
+
+  // NOVA FUNÇÃO: Atualiza os dados do contato no banco de dados
+  async updateContact(number: string, data: { name?: string; email?: string; cnpj?: string }) {
+    try {
+      return await this.prisma.contact.update({
+        where: { number },
+        data: {
+          name: data.name,
+          email: data.email,
+          cnpj: data.cnpj,
+        },
+      });
+    } catch (error: any) {
+      this.logger.error(`Erro ao atualizar contato ${number}:`, error);
+      throw new HttpException('Falha ao atualizar contato', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 }

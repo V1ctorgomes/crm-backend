@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Sse, MessageEvent, HttpCode, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Sse, MessageEvent, HttpCode, UploadedFile, UseInterceptors, BadRequestException, Put } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { WhatsappService } from './whatsapp.service';
 import { R2Service } from './r2.service';
@@ -61,5 +61,14 @@ export class WhatsappController {
   @Get('history/:number')
   async getHistory(@Param('number') number: string) {
     return this.whatsappService.getChatHistory(number);
+  }
+
+  // NOVA ROTA PARA EDITAR CONTATO
+  @Put('contacts/:number')
+  async updateContact(
+    @Param('number') number: string, 
+    @Body() body: { name?: string; email?: string; cnpj?: string }
+  ) {
+    return this.whatsappService.updateContact(number, body);
   }
 }
