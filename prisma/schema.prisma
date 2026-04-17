@@ -38,7 +38,7 @@ model Contact {
   cnpj              String?
 
   messages          Message[]
-  tickets           Ticket[]  // RELAÇÃO: Um contato pode ter várias solicitações
+  tickets           Ticket[]
   updatedAt         DateTime  @updatedAt
 }
 
@@ -56,13 +56,14 @@ model Message {
 }
 
 // ==========================================
-// NOVAS TABELAS DO KANBAN (SOLICITAÇÕES)
+// KANBAN (SOLICITAÇÕES)
 // ==========================================
-
 model Stage {
   id        String   @id @default(uuid())
   name      String
-  order     Int      @default(0)
+  color     String   @default("#e2e8f0") // COR DA FASE
+  order     Int      @default(0)         // SEQUÊNCIA
+  isActive  Boolean  @default(true)      // ATIVA OU DESATIVADA
   tickets   Ticket[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -75,9 +76,9 @@ model Ticket {
   stageId       String
   stage         Stage    @relation(fields: [stageId], references: [id])
   
-  // Campos específicos da solicitação
   marca         String?
   modelo        String?
+  isArchived    Boolean  @default(false) // ARQUIVADO
   
   notes         Note[]
   createdAt     DateTime @default(now())

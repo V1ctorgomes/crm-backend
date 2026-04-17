@@ -5,46 +5,66 @@ import { PrismaService } from '../prisma/prisma.service';
 export class TicketsService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
 
-  // Cria fases padrão caso seja a primeira vez que roda o sistema
   async onModuleInit() {
     const count = await this.prisma.stage.count();
     if (count === 0) {
-      await this.prisma.stage.create({ data: { name: 'Novo', order: 1 } });
-      await this.prisma.stage.create({ data: { name: 'Em Análise', order: 2 } });
-      await this.prisma.stage.create({ data: { name: 'Concluído', order: 3 } });
+      await this.prisma.stage.create({ data: { name: 'Novo', order: 1, color: '#bfdbfe' } });
+      await this.prisma.stage.create({ data: { name: 'Em Análise', order: 2, color: '#fef08a' } });
+      await this.prisma.stage.create({ data: { name: 'Concluído', order: 3, color: '#bbf7d0' } });
     }
   }
 
+  // Traz apenas as fases ativas e os tickets NÃO arquivados
   async getBoard() {
     return this.prisma.stage.findMany({
+      where: { isActive: true },
       orderBy: { order: 'asc' },
       include: {
         tickets: {
-          include: {
-            contact: true,
-            notes: { orderBy: { createdAt: 'desc' } }
-          },
+          where: { isArchived: false },
+          include: { contact: true, notes: { orderBy: { createdAt: 'desc' } } },
           orderBy: { createdAt: 'desc' }
         }
       }
     });
   }
 
-  async createStage(name: string) {
-    const count = await this.prisma.stage.count();
-    return this.prisma.stage.create({
-      data: { name, order: count + 1 }
+  async getAllStages() {
+    return this.prisma.stage.findMany({ orderBy: { order: 'asc' } });
+  }
+
+  async getArchivedTickets() {
+    return this.prisma.ticket.findMany({
+      where: { isArchived: true },
+      include: { contact: true, stage: true, notes: { orderBy: { createdAt: 'desc' } } },
+      orderBy: { updatedAt: 'desc' }
     });
   }
 
+  async createStage(name: string, color: string) {
+    const count = await this.prisma.stage.count();
+    return this.prisma.stage.create({
+      data: { name, color: color || '#e2e8f0', order: count + 1 }
+    });
+  }
+
+  async updateStage(id: string, data: { name?: string; color?: string; isActive?: boolean }) {
+    return this.prisma.stage.update({ where: { id }, data });
+  }
+
+  async reorderStages(stages: { id: string; order: number }[]) {
+    const updates = stages.map(s => 
+      this.prisma.stage.update({ where: { id: s.id }, data: { order: s.order } })
+    );
+    return this.prisma.$transaction(updates);
+  }
+
   async createTicket(data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, stageId: string }) {
-    // 1. Atualiza os dados do contato primeiro (garante que o Nome/Email/CPF ficam salvos)
     await this.prisma.contact.update({
       where: { number: data.contactNumber },
       data: { name: data.nome, email: data.email, cnpj: data.cpf }
     });
 
-    // 2. Cria a solicitação
     return this.prisma.ticket.create({
       data: {
         contactNumber: data.contactNumber,
@@ -57,15 +77,14 @@ export class TicketsService implements OnModuleInit {
   }
 
   async updateTicketStage(ticketId: string, stageId: string) {
-    return this.prisma.ticket.update({
-      where: { id: ticketId },
-      data: { stageId }
-    });
+    return this.prisma.ticket.update({ where: { id: ticketId }, data: { stageId } });
+  }
+
+  async toggleArchiveTicket(ticketId: string, isArchived: boolean) {
+    return this.prisma.ticket.update({ where: { id: ticketId }, data: { isArchived } });
   }
 
   async addNote(ticketId: string, text: string) {
-    return this.prisma.note.create({
-      data: { ticketId, text }
-    });
+    return this.prisma.note.create({ data: { ticketId, text } });
   }
 }

@@ -6,13 +6,27 @@ export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
   @Get('board')
-  getBoard() {
-    return this.ticketsService.getBoard();
-  }
+  getBoard() { return this.ticketsService.getBoard(); }
+
+  @Get('stages')
+  getAllStages() { return this.ticketsService.getAllStages(); }
+
+  @Get('archived')
+  getArchivedTickets() { return this.ticketsService.getArchivedTickets(); }
 
   @Post('stages')
-  createStage(@Body('name') name: string) {
-    return this.ticketsService.createStage(name);
+  createStage(@Body() body: { name: string; color: string }) {
+    return this.ticketsService.createStage(body.name, body.color);
+  }
+
+  @Put('stages/reorder')
+  reorderStages(@Body('stages') stages: { id: string; order: number }[]) {
+    return this.ticketsService.reorderStages(stages);
+  }
+
+  @Put('stages/:id')
+  updateStage(@Param('id') id: string, @Body() data: any) {
+    return this.ticketsService.updateStage(id, data);
   }
 
   @Post()
@@ -23,6 +37,11 @@ export class TicketsController {
   @Put(':id/stage')
   updateTicketStage(@Param('id') id: string, @Body('stageId') stageId: string) {
     return this.ticketsService.updateTicketStage(id, stageId);
+  }
+
+  @Put(':id/archive')
+  toggleArchiveTicket(@Param('id') id: string, @Body('isArchived') isArchived: boolean) {
+    return this.ticketsService.toggleArchiveTicket(id, isArchived);
   }
 
   @Post(':id/notes')
