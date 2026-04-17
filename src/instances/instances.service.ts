@@ -7,6 +7,8 @@ export class InstancesService {
   private readonly logger = new Logger(InstancesService.name);
   private readonly evoUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
   private readonly evoKey = process.env.EVOLUTION_API_KEY;
+  // NOVO: Puxa a URL completa do Webhook do .env
+  private readonly webhookUrl = process.env.WEBHOOK_URL; 
 
   constructor(private prisma: PrismaService) {}
 
@@ -38,13 +40,29 @@ export class InstancesService {
       const errorMessage = error?.response?.data?.message || error.message;
       this.logger.error(`Erro ao criar na Evolution: ${errorMessage}`);
       
-      // Se a instância já existir na Evolution, ignoramos o erro e avançamos para salvar no nosso banco.
       if (!String(errorMessage).toLowerCase().includes('already exists')) {
         throw new HttpException(`Erro na Evolution API: ${errorMessage}`, HttpStatus.BAD_REQUEST);
       }
     }
 
-    // 3. Tenta Aplicar Configurações (Settings)
+    // 3. Configurar Webhook Automático (Agora usando WEBHOOK_URL direto)
+    if (this.webhookUrl) {
+      try {
+        await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
+          url: this.webhookUrl,
+          webhookByEvents: false,
+          webhookBase64: false,
+          events: ["MESSAGES_UPSERT"]
+        }, { headers: { apikey: this.evoKey } });
+        this.logger.log(`Webhook configurado com sucesso para a instância ${data.name}`);
+      } catch (error: any) {
+        this.logger.warn(`Aviso: Não foi possível configurar o webhook para ${data.name}. Verifique a sua Evolution API.`);
+      }
+    } else {
+      this.logger.warn('WEBHOOK_URL não encontrada nas variáveis de ambiente. O Webhook não foi configurado automaticamente.');
+    }
+
+    // 4. Tenta Aplicar Configurações (Settings)
     try {
       await axios.post(`${this.evoUrl}/settings/set/${data.name}`, {
         rejectCall: data.rejectCalls || false, 
@@ -53,11 +71,10 @@ export class InstancesService {
         readStatus: false
       }, { headers: { apikey: this.evoKey } });
     } catch (error: any) {
-      // Usamos apenas um aviso (Warning) para não impedir a criação da instância se as configurações falharem
       this.logger.warn(`Aviso: Não foi possível definir as configurações (Settings) para ${data.name}.`);
     }
 
-    // 4. Salva no Banco de Dados
+    // 5. Salva no Banco de Dados
     try {
       return await this.prisma.instance.create({ 
         data: {
@@ -74,7 +91,7 @@ export class InstancesService {
       });
     } catch (dbError: any) {
       this.logger.error("Erro ao salvar no banco (Prisma)", dbError);
-      throw new HttpException('A instância foi criada na Evolution, mas falhou ao salvar no banco de dados.', HttpStatus.BAD_REQUEST);
+      throw new HttpException('A instância foi criada, mas falhou ao salvar no banco de dados.', HttpStatus.BAD_REQUEST);
     }
   }
 
