@@ -11,7 +11,6 @@ export class InstancesService {
   constructor(private prisma: PrismaService) {}
 
   async findByUser(userId: string) {
-    // Busca e atualiza o status de todas as instâncias em tempo real
     const instances = await this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
     for (const inst of instances) {
       await this.checkStatus(inst.name);
@@ -20,40 +19,71 @@ export class InstancesService {
   }
 
   async create(data: any) {
+    // 1. Validação de Segurança Básica
+    if (!this.evoUrl || !this.evoKey) {
+      throw new HttpException('A URL ou a Chave da Evolution API não estão configuradas no .env do servidor.', HttpStatus.BAD_REQUEST);
+    }
+    if (!data.name || !data.userId) {
+      throw new HttpException('Nome da instância e Usuário são obrigatórios.', HttpStatus.BAD_REQUEST);
+    }
+
+    // 2. Tenta Criar na Evolution API
     try {
-      // 1. Cria na Evolution API V2
       await axios.post(`${this.evoUrl}/instance/create`, {
         instanceName: data.name,
         qrcode: true,
         integration: "WHATSAPP-BAILEYS"
       }, { headers: { apikey: this.evoKey } });
-
-      // 2. Aplica Proxy se existir
-      if (data.proxyHost && data.proxyPort) {
-        await axios.post(`${this.evoUrl}/instance/setProxy/${data.name}`, {
-          host: data.proxyHost, port: Number(data.proxyPort), protocol: data.proxyProto || 'http', username: data.proxyUser, password: data.proxyPass
-        }, { headers: { apikey: this.evoKey } });
-      }
-
-      // 3. Aplica Settings (Rejeitar Chamadas, Ignorar Grupos)
-      await axios.post(`${this.evoUrl}/settings/set/${data.name}`, {
-        rejectCall: data.rejectCalls, groupsIgnore: data.ignoreGroups, readMessages: false, readStatus: false
-      }, { headers: { apikey: this.evoKey } });
-
-      // 4. Salva no Banco de Dados atrelado ao Usuário
-      return await this.prisma.instance.create({ data });
     } catch (error: any) {
-      this.logger.error("Erro ao criar instância na Evolution", error?.response?.data || error.message);
-      throw new HttpException(error?.response?.data?.message || 'Falha ao criar instância', HttpStatus.BAD_REQUEST);
+      const errorMessage = error?.response?.data?.message || error.message;
+      this.logger.error(`Erro ao criar na Evolution: ${errorMessage}`);
+      
+      // Se a instância já existir na Evolution, ignoramos o erro e avançamos para salvar no nosso banco.
+      if (!String(errorMessage).toLowerCase().includes('already exists')) {
+        throw new HttpException(`Erro na Evolution API: ${errorMessage}`, HttpStatus.BAD_REQUEST);
+      }
+    }
+
+    // 3. Tenta Aplicar Configurações (Settings)
+    try {
+      await axios.post(`${this.evoUrl}/settings/set/${data.name}`, {
+        rejectCall: data.rejectCalls || false, 
+        groupsIgnore: data.ignoreGroups || false, 
+        readMessages: false, 
+        readStatus: false
+      }, { headers: { apikey: this.evoKey } });
+    } catch (error: any) {
+      // Usamos apenas um aviso (Warning) para não impedir a criação da instância se as configurações falharem
+      this.logger.warn(`Aviso: Não foi possível definir as configurações (Settings) para ${data.name}.`);
+    }
+
+    // 4. Salva no Banco de Dados
+    try {
+      return await this.prisma.instance.create({ 
+        data: {
+          name: data.name,
+          userId: data.userId,
+          rejectCalls: data.rejectCalls || false,
+          ignoreGroups: data.ignoreGroups || false,
+          proxyHost: data.proxyHost,
+          proxyPort: data.proxyPort,
+          proxyUser: data.proxyUser,
+          proxyPass: data.proxyPass,
+          proxyProto: data.proxyProto
+        } 
+      });
+    } catch (dbError: any) {
+      this.logger.error("Erro ao salvar no banco (Prisma)", dbError);
+      throw new HttpException('A instância foi criada na Evolution, mas falhou ao salvar no banco de dados.', HttpStatus.BAD_REQUEST);
     }
   }
 
   async getQrCode(instanceName: string) {
     try {
       const res = await axios.get(`${this.evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: this.evoKey } });
-      return res.data; // Retorna o Base64
+      return res.data;
     } catch (error: any) {
-      throw new HttpException('QR Code não disponível ou já conectado', HttpStatus.BAD_REQUEST);
+      throw new HttpException('QR Code indisponível. A instância já pode estar conectada.', HttpStatus.BAD_REQUEST);
     }
   }
 
@@ -87,15 +117,16 @@ export class InstancesService {
         data: { rejectCalls: data.rejectCalls, ignoreGroups: data.ignoreGroups }
       });
     } catch (error: any) {
-      throw new HttpException('Falha ao atualizar configurações', HttpStatus.BAD_REQUEST);
+      throw new HttpException('Falha ao atualizar configurações na Evolution API.', HttpStatus.BAD_REQUEST);
     }
   }
 
   async remove(instanceName: string) {
     try {
-      // Deleta da Evolution (E faz logout do WhatsApp)
       await axios.delete(`${this.evoUrl}/instance/delete/${instanceName}`, { headers: { apikey: this.evoKey } });
-    } catch (e) { /* Ignora se já não existir lá */ }
+    } catch (e) { 
+      this.logger.warn(`A instância ${instanceName} já não existia na Evolution API ou falhou ao apagar.`);
+    }
     
     return this.prisma.instance.delete({ where: { name: instanceName } });
   }
