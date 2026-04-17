@@ -23,28 +23,21 @@ export class InstancesService {
     if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
 
     try {
-      // 1. Cria instância
       await axios.post(`${this.evoUrl}/instance/create`, {
-        instanceName: data.name,
-        qrcode: true,
-        integration: "WHATSAPP-BAILEYS"
+        instanceName: data.name, qrcode: true, integration: "WHATSAPP-BAILEYS"
       }, { headers: { apikey: this.evoKey } });
     } catch (error: any) {
       if (!error?.response?.data?.message?.includes('already exists')) throw new HttpException('Erro Evolution API', HttpStatus.BAD_REQUEST);
     }
 
-    // 2. Configura Webhook com eventos corretos
     if (this.webhookUrl) {
       try {
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
-          url: this.webhookUrl,
-          webhookByEvents: false,
-          events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "CONNECTION_UPDATE"]
+          url: this.webhookUrl, webhookByEvents: false, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "CONNECTION_UPDATE"]
         }, { headers: { apikey: this.evoKey } });
       } catch (e) { this.logger.warn("Falha ao setar Webhook"); }
     }
 
-    // 3. Salva no banco
     return await this.prisma.instance.create({ 
       data: {
         name: data.name, userId: data.userId,
@@ -68,6 +61,22 @@ export class InstancesService {
       const res = await axios.get(`${this.evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: this.evoKey } });
       return res.data;
     } catch (e) { throw new HttpException('QR Indisponível', HttpStatus.BAD_REQUEST); }
+  }
+
+  // 👉 A FUNÇÃO QUE FALTAVA ESTÁ AQUI:
+  async updateSettings(instanceName: string, data: any) {
+    try {
+      await axios.post(`${this.evoUrl}/settings/set/${instanceName}`, {
+        rejectCall: data.rejectCalls, groupsIgnore: data.ignoreGroups
+      }, { headers: { apikey: this.evoKey } });
+
+      return await this.prisma.instance.update({
+        where: { name: instanceName },
+        data: { rejectCalls: data.rejectCalls, ignoreGroups: data.ignoreGroups }
+      });
+    } catch (error: any) {
+      throw new HttpException('Falha ao atualizar configurações na Evolution API.', HttpStatus.BAD_REQUEST);
+    }
   }
 
   async remove(instanceName: string) {
