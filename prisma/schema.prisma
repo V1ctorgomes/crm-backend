@@ -86,6 +86,9 @@ model Stage {
   updatedAt DateTime @updatedAt
 }
 
+
+
+
 model Ticket {
   id            String   @id @default(uuid())
   contactNumber String
