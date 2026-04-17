@@ -12,7 +12,10 @@ model User {
   email     String   @unique
   name      String
   password  String   
-  role      String   @default("USER") // ADMIN, USER, ou DEVELOPER
+  role      String   @default("USER")
+  
+  instances Instance[] // NOVO: Relação 1 para N (Um usuário tem várias instâncias)
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -89,4 +92,27 @@ model Note {
   ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   text      String   @db.Text
   createdAt DateTime @default(now())
+}
+
+model Instance {
+  id           String   @id @default(uuid())
+  name         String   @unique // Nome exato da instância na Evolution
+  status       String   @default("disconnected") // connected, disconnected, connecting
+  
+  // Configurações
+  rejectCalls  Boolean  @default(false)
+  ignoreGroups Boolean  @default(false)
+  
+  // Proxy (Opcional)
+  proxyHost    String?
+  proxyPort    String?
+  proxyUser    String?
+  proxyPass    String?
+  proxyProto   String?  @default("http")
+
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
