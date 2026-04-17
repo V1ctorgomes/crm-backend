@@ -12,6 +12,7 @@ model User {
   email     String   @unique
   name      String
   password  String   
+  role      String   @default("USER") // ADMIN, USER, ou DEVELOPER
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -55,15 +56,12 @@ model Message {
   timestamp     DateTime @default(now())
 }
 
-// ==========================================
-// KANBAN (SOLICITAÇÕES)
-// ==========================================
 model Stage {
   id        String   @id @default(uuid())
   name      String
-  color     String   @default("#e2e8f0") // COR DA FASE
-  order     Int      @default(0)         // SEQUÊNCIA
-  isActive  Boolean  @default(true)      // ATIVA OU DESATIVADA
+  color     String   @default("#e2e8f0")
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
   tickets   Ticket[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -78,7 +76,7 @@ model Ticket {
   
   marca         String?
   modelo        String?
-  isArchived    Boolean  @default(false) // ARQUIVADO
+  isArchived    Boolean  @default(false)
   
   notes         Note[]
   createdAt     DateTime @default(now())

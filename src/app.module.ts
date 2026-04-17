@@ -7,6 +7,7 @@ import { CustomersModule } from './customers/customers.module';
 import { AuthModule } from './auth/auth.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module'; // <-- Nova importação
 import { TicketsModule } from './tickets/tickets.module';
+import { UsersModule } from './users/users.module'; // <-- IMPORTAÇÃO
 
 @Module({
   imports: [
@@ -14,7 +15,8 @@ import { TicketsModule } from './tickets/tickets.module';
     CustomersModule, 
     AuthModule, // Esta linha é a que faz a rota /auth aparecer no log
     WhatsappModule,// <-- Registando o módulo do WhatsApp na aplicação
-    TicketsModule // <-- Registando o módulo dos tickets na aplicação
+    TicketsModule,
+    UsersModule 
   ],
   controllers: [AppController],
   providers: [AppService],
