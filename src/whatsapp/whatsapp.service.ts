@@ -8,18 +8,27 @@ import { R2Service } from './r2.service';
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
   
+  // Apenas a URL e a Global API Key continuam no .env
   private readonly apiUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
   private readonly apiKey = process.env.EVOLUTION_API_KEY;
-  private readonly instanceName = process.env.EVOLUTION_INSTANCE_NAME;
 
   private messageSubject = new Subject<any>();
   public readonly messageStream$ = this.messageSubject.asObservable();
 
   constructor(private prisma: PrismaService, private r2Service: R2Service) {}
 
-  private async fetchProfilePicture(number: string): Promise<string | undefined> {
+  // NOVO: Busca dinamicamente a instância cadastrada no banco de dados
+  private async getDefaultInstanceName(): Promise<string> {
+    const instance = await this.prisma.instance.findFirst();
+    if (!instance) {
+      throw new HttpException('Nenhuma instância do WhatsApp configurada no sistema. Vá às Configurações e crie uma.', HttpStatus.BAD_REQUEST);
+    }
+    return instance.name;
+  }
+
+  private async fetchProfilePicture(number: string, instanceName: string): Promise<string | undefined> {
     try {
-      const endpoint = `${this.apiUrl}/chat/fetchProfilePictureUrl/${this.instanceName}`;
+      const endpoint = `${this.apiUrl}/chat/fetchProfilePictureUrl/${instanceName}`;
       const response = await axios.post(
         endpoint, { number: number }, { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } }
       );
@@ -29,6 +38,10 @@ export class WhatsappService {
 
   async processWebhook(payload: any) {
     if (payload?.event !== 'messages.upsert' || !payload?.data) return;
+
+    // A Evolution API v2 envia o nome da instância no payload. Se falhar, busca no banco.
+    const instanceName = payload.instance || (await this.prisma.instance.findFirst())?.name;
+    if (!instanceName) return;
 
     const msgData = payload.data;
     const remoteJid = msgData.key?.remoteJid;
@@ -50,7 +63,7 @@ export class WhatsappService {
 
     if (mediaObject && !isFromMe) { 
       try {
-        const endpoint = `${this.apiUrl}/chat/getBase64FromMediaMessage/${this.instanceName}`;
+        const endpoint = `${this.apiUrl}/chat/getBase64FromMediaMessage/${instanceName}`;
         const response = await axios.post(
           endpoint, { message: msgData }, { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } }
         );
@@ -84,7 +97,7 @@ export class WhatsappService {
     try {
       const existingContact = await this.prisma.contact.findUnique({ where: { number: contactNumber } });
       if (!picUrl && (!existingContact || !existingContact.profilePictureUrl)) {
-        picUrl = await this.fetchProfilePicture(contactNumber);
+        picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
       }
 
       const contact = await this.prisma.contact.upsert({
@@ -123,20 +136,28 @@ export class WhatsappService {
   }
 
   async sendText(number: string, text: string) {
-    if (!this.apiUrl || !this.apiKey || !this.instanceName) throw new HttpException('Erro de configuração', HttpStatus.INTERNAL_SERVER_ERROR);
+    if (!this.apiUrl || !this.apiKey) {
+      throw new HttpException('Erro de configuração na URL ou Key da Evolution', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+    
+    // Puxa a instância do banco de dados dinamicamente!
+    const instanceName = await this.getDefaultInstanceName();
     const cleanNumber = number.replace(/\D/g, '');
-    const endpoint = `${this.apiUrl}/message/sendText/${this.instanceName}`;
+    const endpoint = `${this.apiUrl}/message/sendText/${instanceName}`;
+    
     try {
       const response = await axios.post(endpoint, { number: cleanNumber, text: text }, { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } });
       await this.prisma.message.create({ data: { contactNumber: cleanNumber, text: text, type: 'sent', timestamp: new Date() } });
       await this.prisma.contact.update({ where: { number: cleanNumber }, data: { lastMessage: text, lastMessageTime: new Date() } }).catch(() => null);
       return { success: true, messageId: response.data?.key?.id };
-    } catch (error: any) { throw new HttpException('Falha na API', HttpStatus.BAD_REQUEST); }
+    } catch (error: any) { throw new HttpException('Falha na API Evolution', HttpStatus.BAD_REQUEST); }
   }
 
   async sendMedia(number: string, publicUrl: string, fileName: string, mimeType: string, caption: string) {
+    const instanceName = await this.getDefaultInstanceName();
     const cleanNumber = number.replace(/\D/g, '');
-    const endpoint = `${this.apiUrl}/message/sendMedia/${this.instanceName}`;
+    const endpoint = `${this.apiUrl}/message/sendMedia/${instanceName}`;
+    
     let mediatype = 'document';
     if (mimeType.startsWith('image')) mediatype = 'image';
     else if (mimeType.startsWith('video')) mediatype = 'video';
@@ -165,7 +186,6 @@ export class WhatsappService {
     });
   }
 
-  // NOVA FUNÇÃO: Atualiza os dados do contato no banco de dados
   async updateContact(number: string, data: { name?: string; email?: string; cnpj?: string }) {
     try {
       return await this.prisma.contact.update({
