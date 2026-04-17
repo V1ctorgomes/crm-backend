@@ -8,18 +8,33 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
+  id        String     @id @default(uuid())
+  email     String     @unique
   name      String
   password  String   
-  role      String   @default("USER")
-  
-  instances Instance[] // NOVO: Relação 1 para N (Um usuário tem várias instâncias)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  role      String     @default("USER")
+  instances Instance[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   @@map("users")
+}
+
+model Instance {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  status       String   @default("disconnected")
+  rejectCalls  Boolean  @default(false)
+  ignoreGroups Boolean  @default(false)
+  proxyHost    String?
+  proxyPort    String?
+  proxyUser    String?
+  proxyPass    String?
+  proxyProto   String?  @default("http")
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Customer {
@@ -34,13 +49,13 @@ model Customer {
 
 model Contact {
   number            String    @id
+  instanceName      String?   
   name              String?
   profilePictureUrl String?
   lastMessage       String?
   lastMessageTime   DateTime? @default(now())
   email             String?
   cnpj              String?
-
   messages          Message[]
   tickets           Ticket[]
   updatedAt         DateTime  @updatedAt
@@ -48,6 +63,7 @@ model Contact {
 
 model Message {
   id            String   @id @default(uuid())
+  instanceName  String?  
   contactNumber String
   contact       Contact  @relation(fields: [contactNumber], references: [number])
   text          String   @db.Text
@@ -76,11 +92,9 @@ model Ticket {
   contact       Contact  @relation(fields: [contactNumber], references: [number])
   stageId       String
   stage         Stage    @relation(fields: [stageId], references: [id])
-  
   marca         String?
   modelo        String?
   isArchived    Boolean  @default(false)
-  
   notes         Note[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -92,27 +106,4 @@ model Note {
   ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   text      String   @db.Text
   createdAt DateTime @default(now())
-}
-
-model Instance {
-  id           String   @id @default(uuid())
-  name         String   @unique // Nome exato da instância na Evolution
-  status       String   @default("disconnected") // connected, disconnected, connecting
-  
-  // Configurações
-  rejectCalls  Boolean  @default(false)
-  ignoreGroups Boolean  @default(false)
-  
-  // Proxy (Opcional)
-  proxyHost    String?
-  proxyPort    String?
-  proxyUser    String?
-  proxyPass    String?
-  proxyProto   String?  @default("http")
-
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 }
