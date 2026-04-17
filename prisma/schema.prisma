@@ -37,19 +37,9 @@ model Instance {
   updatedAt    DateTime @updatedAt
 }
 
-model Customer {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  phone     String?
-  company   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 model Contact {
   number            String    @id
-  instanceName      String?   
+  instanceName      String?   // Filtro por instância
   name              String?
   profilePictureUrl String?
   lastMessage       String?
@@ -63,7 +53,7 @@ model Contact {
 
 model Message {
   id            String   @id @default(uuid())
-  instanceName  String?  
+  instanceName  String?  // Filtro por instância
   contactNumber String
   contact       Contact  @relation(fields: [contactNumber], references: [number])
   text          String   @db.Text
@@ -85,9 +75,6 @@ model Stage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
-
-
-
 
 model Ticket {
   id            String   @id @default(uuid())
