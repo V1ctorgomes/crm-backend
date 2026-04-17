@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -14,7 +14,6 @@ export class TicketsService implements OnModuleInit {
     }
   }
 
-  // Traz apenas as fases ativas e os tickets NÃO arquivados
   async getBoard() {
     return this.prisma.stage.findMany({
       where: { isActive: true },
@@ -52,6 +51,20 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.stage.update({ where: { id }, data });
   }
 
+  async deleteStage(id: string) {
+    // PROTEÇÃO: Verifica se há solicitações dentro da fase
+    const stage = await this.prisma.stage.findUnique({
+      where: { id },
+      include: { _count: { select: { tickets: true } } }
+    });
+
+    if (stage && stage._count.tickets > 0) {
+      throw new HttpException('Não é possível apagar uma fase que contém solicitações. Mova ou arquive-as primeiro.', HttpStatus.BAD_REQUEST);
+    }
+
+    return this.prisma.stage.delete({ where: { id } });
+  }
+
   async reorderStages(stages: { id: string; order: number }[]) {
     const updates = stages.map(s => 
       this.prisma.stage.update({ where: { id: s.id }, data: { order: s.order } })
@@ -86,5 +99,9 @@ export class TicketsService implements OnModuleInit {
 
   async addNote(ticketId: string, text: string) {
     return this.prisma.note.create({ data: { ticketId, text } });
+  }
+
+  async deleteNote(id: string) {
+    return this.prisma.note.delete({ where: { id } });
   }
 }

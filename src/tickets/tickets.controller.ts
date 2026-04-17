@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 
 @Controller('tickets')
@@ -29,6 +29,11 @@ export class TicketsController {
     return this.ticketsService.updateStage(id, data);
   }
 
+  @Delete('stages/:id')
+  deleteStage(@Param('id') id: string) {
+    return this.ticketsService.deleteStage(id);
+  }
+
   @Post()
   createTicket(@Body() body: any) {
     return this.ticketsService.createTicket(body);
@@ -47,5 +52,10 @@ export class TicketsController {
   @Post(':id/notes')
   addNote(@Param('id') id: string, @Body('text') text: string) {
     return this.ticketsService.addNote(id, text);
+  }
+
+  @Delete('notes/:id')
+  deleteNote(@Param('id') id: string) {
+    return this.ticketsService.deleteNote(id);
   }
 }
