@@ -6,13 +6,15 @@ import { PrismaModule } from './prisma/prisma.module';
 import { CustomersModule } from './customers/customers.module';
 import { AuthModule } from './auth/auth.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module'; // <-- Nova importação
+import { TicketsModule } from './tickets/tickets.module';
 
 @Module({
   imports: [
     PrismaModule, 
     CustomersModule, 
     AuthModule, // Esta linha é a que faz a rota /auth aparecer no log
-    WhatsappModule // <-- Registando o módulo do WhatsApp na aplicação
+    WhatsappModule,// <-- Registando o módulo do WhatsApp na aplicação
+    TicketsModule // <-- Registando o módulo dos tickets na aplicação
   ],
   controllers: [AppController],
   providers: [AppService],

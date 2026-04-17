@@ -7,9 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ==========================================
-// AS SUAS TABELAS ORIGINAIS (COMPLETAS)
-// ==========================================
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -31,21 +28,17 @@ model Customer {
   updatedAt DateTime @updatedAt
 }
 
-// ==========================================
-// AS NOSSAS NOVAS TABELAS DO WHATSAPP
-// ==========================================
 model Contact {
   number            String    @id
   name              String?
   profilePictureUrl String?
   lastMessage       String?
   lastMessageTime   DateTime? @default(now())
-  
-  // ADICIONADO: E-mail e CNPJ
   email             String?
   cnpj              String?
 
   messages          Message[]
+  tickets           Ticket[]  // RELAÇÃO: Um contato pode ter várias solicitações
   updatedAt         DateTime  @updatedAt
 }
 
@@ -55,10 +48,46 @@ model Message {
   contact       Contact  @relation(fields: [contactNumber], references: [number])
   text          String   @db.Text
   type          String   
-  // NOVOS CAMPOS PARA MÍDIA:
   isMedia       Boolean  @default(false)
-  mediaData     String?  @db.Text // Guardará a URL da imagem/documento
-  mimeType      String?  // Ex: image/png, application/pdf
-  fileName      String?  // Ex: relatorio.pdf
+  mediaData     String?  @db.Text
+  mimeType      String?  
+  fileName      String?  
   timestamp     DateTime @default(now())
+}
+
+// ==========================================
+// NOVAS TABELAS DO KANBAN (SOLICITAÇÕES)
+// ==========================================
+
+model Stage {
+  id        String   @id @default(uuid())
+  name      String
+  order     Int      @default(0)
+  tickets   Ticket[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Ticket {
+  id            String   @id @default(uuid())
+  contactNumber String
+  contact       Contact  @relation(fields: [contactNumber], references: [number])
+  stageId       String
+  stage         Stage    @relation(fields: [stageId], references: [id])
+  
+  // Campos específicos da solicitação
+  marca         String?
+  modelo        String?
+  
+  notes         Note[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  text      String   @db.Text
+  createdAt DateTime @default(now())
 }
