@@ -37,9 +37,20 @@ model Instance {
   updatedAt    DateTime @updatedAt
 }
 
+// 👉 O MODELO QUE FALTOU E CAUSOU O ERRO ESTÁ AQUI:
+model Customer {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  company   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Contact {
   number            String    @id
-  instanceName      String?   // Filtro por instância
+  instanceName      String?   
   name              String?
   profilePictureUrl String?
   lastMessage       String?
@@ -53,7 +64,7 @@ model Contact {
 
 model Message {
   id            String   @id @default(uuid())
-  instanceName  String?  // Filtro por instância
+  instanceName  String?  
   contactNumber String
   contact       Contact  @relation(fields: [contactNumber], references: [number])
   text          String   @db.Text
