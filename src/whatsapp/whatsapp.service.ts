@@ -29,22 +29,24 @@ export class WhatsappService {
   }
 
   async processWebhook(payload: any) {
-    // Captura múltiplos eventos para manter o chat vivo (Upsert = nova, Update = status/edição)
-    const allowedEvents = ['messages.upsert', 'messages.update'];
+    // CORREÇÃO: Adicionámos o 'send.message' para capturar mensagens enviadas pelo Telemóvel!
+    const allowedEvents = ['messages.upsert', 'messages.update', 'send.message'];
     if (!allowedEvents.includes(payload?.event) || !payload?.data) return;
 
     const instanceName = payload.instance;
     const msgData = Array.isArray(payload.data) ? payload.data[0] : payload.data;
     const remoteJid = msgData.key?.remoteJid;
     
-    if (!remoteJid || remoteJid.includes('@g.us')) return;
+    if (!remoteJid || remoteJid.includes('@g.us') || remoteJid === 'status@broadcast') return;
 
     const contactNumber = remoteJid.split('@')[0];
     const isFromMe = msgData.key?.fromMe || false;
+    const waId = msgData.key?.id; // Pega o ID real do WhatsApp
     const text = msgData.message?.conversation || msgData.message?.extendedTextMessage?.text || (msgData.message?.imageMessage ? "📷 Imagem" : "Mídia");
+    const pushName = msgData.pushName || contactNumber;
 
     try {
-      if (payload.event === 'messages.upsert') {
+      if (payload.event === 'messages.upsert' || payload.event === 'send.message') {
         const existingContact = await this.prisma.contact.findUnique({ where: { number: contactNumber } });
         let picUrl = existingContact?.profilePictureUrl;
         
@@ -53,17 +55,23 @@ export class WhatsappService {
         await this.prisma.contact.upsert({
           where: { number: contactNumber },
           update: { lastMessage: text, lastMessageTime: new Date(), instanceName, ...(picUrl && { profilePictureUrl: picUrl }) },
-          create: { number: contactNumber, name: msgData.pushName || contactNumber, lastMessage: text, instanceName, profilePictureUrl: picUrl }
+          create: { number: contactNumber, name: pushName, lastMessage: text, instanceName, profilePictureUrl: picUrl }
         });
 
-        await this.prisma.message.create({
-          data: { instanceName, contactNumber, text, type: isFromMe ? 'sent' : 'received', timestamp: new Date() }
-        });
+        // SISTEMA ANTI-DUPLICAÇÃO: Só cria a mensagem no banco se o waId ainda não existir
+        if (waId) {
+          const msgExists = await this.prisma.message.findUnique({ where: { id: waId } });
+          if (!msgExists) {
+            await this.prisma.message.create({
+              data: { id: waId, instanceName, contactNumber, text, type: isFromMe ? 'sent' : 'received', timestamp: new Date() }
+            });
+          }
+        }
         
         if (picUrl) payload.data.profilePictureUrl = picUrl;
       }
 
-      // Envia para o SSE (Tempo Real) indepentende de ser Upsert ou Update
+      // Emite o evento para o Frontend se atualizar na hora
       this.messageSubject.next(payload);
     } catch (e) {
       this.logger.error("Erro no processamento do Webhook", e);
@@ -74,7 +82,13 @@ export class WhatsappService {
     const instanceName = await this.getDefaultInstanceName();
     try {
       const response = await axios.post(`${this.apiUrl}/message/sendText/${instanceName}`, { number, text }, { headers: { apikey: this.apiKey } });
-      await this.prisma.message.create({ data: { instanceName, contactNumber: number, text, type: 'sent' } });
+      
+      const waId = response.data?.key?.id; // Pega o ID retornado pela Evolution
+      
+      // Salva com o ID correto. Assim o webhook não a duplica quando chegar!
+      await this.prisma.message.create({ 
+        data: { id: waId, instanceName, contactNumber: number, text, type: 'sent', timestamp: new Date() } 
+      });
       return { success: true, data: response.data };
     } catch (e) { throw new HttpException('Erro ao enviar', HttpStatus.BAD_REQUEST); }
   }
