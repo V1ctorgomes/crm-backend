@@ -23,38 +23,52 @@ export class InstancesService {
     if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
 
     try {
+      // 1. Criar a Instância
       await axios.post(`${this.evoUrl}/instance/create`, {
-        instanceName: data.name, qrcode: true, integration: "WHATSAPP-BAILEYS"
+        instanceName: data.name,
+        qrcode: true,
+        integration: "WHATSAPP-BAILEYS"
       }, { headers: { apikey: this.evoKey } });
-    } catch (error: any) {
-      if (!error?.response?.data?.message?.includes('already exists')) throw new HttpException('Erro Evolution API', HttpStatus.BAD_REQUEST);
-    }
 
-    // CORREÇÃO AQUI: Formato correto do Webhook para a Evolution API v2
-    if (this.webhookUrl) {
-      try {
+      this.logger.log(`Instância ${data.name} criada. Aguardando para configurar webhook...`);
+
+      // 2. Pequena espera (2 segundos) para a Evolution processar a criação
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // 3. Configurar Webhook (Formato exato Evolution v2)
+      if (this.webhookUrl) {
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
           webhook: {
-            url: this.webhookUrl, 
-            byEvents: false, 
+            enabled: true,
+            url: this.webhookUrl,
+            byEvents: false, // Na v2 mudou de webhookByEvents para byEvents
             base64: false,
-            readMessage: false,
-            events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "CONNECTION_UPDATE"]
+            events: [
+              "MESSAGES_UPSERT",
+              "MESSAGES_UPDATE",
+              "MESSAGES_DELETE",
+              "SEND_MESSAGE",
+              "CONNECTION_UPDATE"
+            ]
           }
         }, { headers: { apikey: this.evoKey } });
-        this.logger.log(`Webhook configurado com sucesso para a instância ${data.name}`);
-      } catch (e: any) { 
-        this.logger.warn(`Falha ao setar Webhook: ${e?.response?.data?.message || e.message}`); 
+        this.logger.log(`Webhook ativado para ${data.name}`);
       }
-    }
 
-    return await this.prisma.instance.create({ 
-      data: {
-        name: data.name, userId: data.userId,
-        rejectCalls: data.rejectCalls || false, ignoreGroups: data.ignoreGroups || false,
-        proxyHost: data.proxyHost, proxyPort: data.proxyPort, proxyUser: data.proxyUser, proxyPass: data.proxyPass, proxyProto: data.proxyProto
-      } 
-    });
+      // 4. Salvar no Banco
+      return await this.prisma.instance.create({ 
+        data: {
+          name: data.name, userId: data.userId,
+          rejectCalls: data.rejectCalls || false, ignoreGroups: data.ignoreGroups || false,
+          proxyHost: data.proxyHost, proxyPort: data.proxyPort, proxyUser: data.proxyUser, proxyPass: data.proxyPass, proxyProto: data.proxyProto
+        } 
+      });
+
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || error.message;
+      this.logger.error(`Erro na criação/webhook: ${msg}`);
+      throw new HttpException(`Erro Evolution: ${msg}`, HttpStatus.BAD_REQUEST);
+    }
   }
 
   async checkStatus(instanceName: string) {
@@ -78,14 +92,8 @@ export class InstancesService {
       await axios.post(`${this.evoUrl}/settings/set/${instanceName}`, {
         rejectCall: data.rejectCalls, groupsIgnore: data.ignoreGroups
       }, { headers: { apikey: this.evoKey } });
-
-      return await this.prisma.instance.update({
-        where: { name: instanceName },
-        data: { rejectCalls: data.rejectCalls, ignoreGroups: data.ignoreGroups }
-      });
-    } catch (error: any) {
-      throw new HttpException('Falha ao atualizar configurações na Evolution API.', HttpStatus.BAD_REQUEST);
-    }
+      return await this.prisma.instance.update({ where: { name: instanceName }, data: { rejectCalls: data.rejectCalls, ignoreGroups: data.ignoreGroups } });
+    } catch (e) { throw new HttpException('Erro ao atualizar settings', HttpStatus.BAD_REQUEST); }
   }
 
   async remove(instanceName: string) {

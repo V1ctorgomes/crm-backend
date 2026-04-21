@@ -21,79 +21,61 @@ export class WhatsappService {
     return inst.name;
   }
 
-  // CORREÇÃO: Função para buscar a foto de perfil na Evolution API
   private async fetchProfilePicture(number: string, instanceName: string): Promise<string | undefined> {
     try {
-      const response = await axios.post(
-        `${this.apiUrl}/chat/fetchProfilePictureUrl/${instanceName}`, 
-        { number: number }, 
-        { headers: { 'Content-Type': 'application/json', 'apikey': this.apiKey } }
-      );
+      const response = await axios.post(`${this.apiUrl}/chat/fetchProfilePictureUrl/${instanceName}`, { number }, { headers: { apikey: this.apiKey } });
       return response.data?.profilePictureUrl || undefined;
-    } catch (error) { 
-      return undefined; 
-    }
+    } catch { return undefined; }
   }
 
   async processWebhook(payload: any) {
-    if (payload?.event !== 'messages.upsert' || !payload?.data) return;
+    // Captura múltiplos eventos para manter o chat vivo (Upsert = nova, Update = status/edição)
+    const allowedEvents = ['messages.upsert', 'messages.update'];
+    if (!allowedEvents.includes(payload?.event) || !payload?.data) return;
+
     const instanceName = payload.instance;
-    const msgData = payload.data;
+    const msgData = Array.isArray(payload.data) ? payload.data[0] : payload.data;
     const remoteJid = msgData.key?.remoteJid;
+    
     if (!remoteJid || remoteJid.includes('@g.us')) return;
 
     const contactNumber = remoteJid.split('@')[0];
     const isFromMe = msgData.key?.fromMe || false;
-    const text = msgData.message?.conversation || msgData.message?.extendedTextMessage?.text || "Mídia";
-    const pushName = msgData.pushName || contactNumber;
+    const text = msgData.message?.conversation || msgData.message?.extendedTextMessage?.text || (msgData.message?.imageMessage ? "📷 Imagem" : "Mídia");
 
     try {
-      // 1. Verifica se já temos este contacto e se ele já tem foto
-      const existingContact = await this.prisma.contact.findUnique({ where: { number: contactNumber } });
-      let picUrl = existingContact?.profilePictureUrl;
-      
-      // 2. Se não tem foto, pede à Evolution
-      if (!picUrl) {
-        picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
+      if (payload.event === 'messages.upsert') {
+        const existingContact = await this.prisma.contact.findUnique({ where: { number: contactNumber } });
+        let picUrl = existingContact?.profilePictureUrl;
+        
+        if (!picUrl) picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
+
+        await this.prisma.contact.upsert({
+          where: { number: contactNumber },
+          update: { lastMessage: text, lastMessageTime: new Date(), instanceName, ...(picUrl && { profilePictureUrl: picUrl }) },
+          create: { number: contactNumber, name: msgData.pushName || contactNumber, lastMessage: text, instanceName, profilePictureUrl: picUrl }
+        });
+
+        await this.prisma.message.create({
+          data: { instanceName, contactNumber, text, type: isFromMe ? 'sent' : 'received', timestamp: new Date() }
+        });
+        
+        if (picUrl) payload.data.profilePictureUrl = picUrl;
       }
 
-      // 3. Atualiza ou cria o contacto, guardando a foto
-      const contact = await this.prisma.contact.upsert({
-        where: { number: contactNumber },
-        update: { 
-          name: pushName !== contactNumber ? pushName : existingContact?.name, 
-          lastMessage: text, 
-          lastMessageTime: new Date(), 
-          instanceName,
-          ...(picUrl && { profilePictureUrl: picUrl }) 
-        },
-        create: { 
-          number: contactNumber, 
-          name: pushName, 
-          lastMessage: text, 
-          instanceName,
-          profilePictureUrl: picUrl || null
-        }
-      });
-
-      await this.prisma.message.create({
-        data: { instanceName, contactNumber, text, type: isFromMe ? 'sent' : 'received', timestamp: new Date() }
-      });
-
-      // Anexa a foto ao evento de "tempo real" (SSE) para aparecer logo no frontend
-      if (picUrl) payload.data.profilePictureUrl = picUrl;
+      // Envia para o SSE (Tempo Real) indepentende de ser Upsert ou Update
       this.messageSubject.next(payload);
-    } catch (e) { 
-      this.logger.error("Erro Webhook DB", e); 
+    } catch (e) {
+      this.logger.error("Erro no processamento do Webhook", e);
     }
   }
 
   async sendText(number: string, text: string) {
     const instanceName = await this.getDefaultInstanceName();
     try {
-      await axios.post(`${this.apiUrl}/message/sendText/${instanceName}`, { number, text }, { headers: { apikey: this.apiKey } });
+      const response = await axios.post(`${this.apiUrl}/message/sendText/${instanceName}`, { number, text }, { headers: { apikey: this.apiKey } });
       await this.prisma.message.create({ data: { instanceName, contactNumber: number, text, type: 'sent' } });
-      return { success: true };
+      return { success: true, data: response.data };
     } catch (e) { throw new HttpException('Erro ao enviar', HttpStatus.BAD_REQUEST); }
   }
 
