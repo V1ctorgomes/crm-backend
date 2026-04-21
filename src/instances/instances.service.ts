@@ -30,12 +30,22 @@ export class InstancesService {
       if (!error?.response?.data?.message?.includes('already exists')) throw new HttpException('Erro Evolution API', HttpStatus.BAD_REQUEST);
     }
 
+    // CORREÇÃO AQUI: Formato correto do Webhook para a Evolution API v2
     if (this.webhookUrl) {
       try {
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
-          url: this.webhookUrl, webhookByEvents: false, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "CONNECTION_UPDATE"]
+          webhook: {
+            url: this.webhookUrl, 
+            byEvents: false, 
+            base64: false,
+            readMessage: false,
+            events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "CONNECTION_UPDATE"]
+          }
         }, { headers: { apikey: this.evoKey } });
-      } catch (e) { this.logger.warn("Falha ao setar Webhook"); }
+        this.logger.log(`Webhook configurado com sucesso para a instância ${data.name}`);
+      } catch (e: any) { 
+        this.logger.warn(`Falha ao setar Webhook: ${e?.response?.data?.message || e.message}`); 
+      }
     }
 
     return await this.prisma.instance.create({ 
@@ -63,7 +73,6 @@ export class InstancesService {
     } catch (e) { throw new HttpException('QR Indisponível', HttpStatus.BAD_REQUEST); }
   }
 
-  // 👉 A FUNÇÃO QUE FALTAVA ESTÁ AQUI:
   async updateSettings(instanceName: string, data: any) {
     try {
       await axios.post(`${this.evoUrl}/settings/set/${instanceName}`, {
