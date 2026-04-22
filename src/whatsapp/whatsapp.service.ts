@@ -164,6 +164,14 @@ export class WhatsappService {
       );
       const waId = response.data?.key?.id;
       
+      // NOVO: Garante que o contato existe no banco antes de criar a mensagem, 
+      // essencial para iniciar conversas novas a partir do CRM
+      await this.prisma.contact.upsert({
+        where: { number: number },
+        update: { lastMessage: text, lastMessageTime: new Date(), instanceName },
+        create: { number: number, name: number, lastMessage: text, instanceName }
+      });
+
       if (waId) {
         await this.prisma.message.create({ 
           data: { id: String(waId), instanceName, contactNumber: number, text, type: 'sent', timestamp: new Date() } 
@@ -216,6 +224,12 @@ export class WhatsappService {
 
       const waId = response.data?.key?.id || Date.now().toString();
 
+      await this.prisma.contact.upsert({
+        where: { number: cleanNumber },
+        update: { lastMessage: caption || '📷 Mídia', lastMessageTime: new Date(), instanceName },
+        create: { number: cleanNumber, name: cleanNumber, lastMessage: caption || '📷 Mídia', instanceName }
+      });
+
       const savedMessage = await this.prisma.message.create({
         data: {
           id: String(waId), 
@@ -229,12 +243,6 @@ export class WhatsappService {
           fileName: fileOriginalName, 
           timestamp: new Date()
         }
-      });
-
-      await this.prisma.contact.upsert({
-        where: { number: cleanNumber },
-        update: { lastMessage: caption || '📷 Mídia', lastMessageTime: new Date(), instanceName },
-        create: { number: cleanNumber, name: cleanNumber, lastMessage: caption || '📷 Mídia', instanceName }
       });
 
       return { success: true, id: waId, mediaData: mediaUrl, ...savedMessage };
