@@ -271,6 +271,9 @@ export class WhatsappService {
     try {
       const instanceName = await this.getDefaultInstanceName();
       
+      // 0. NOVO: Apaga as mídias da Cloudflare R2 antes de limpar o banco!
+      await this.r2Service.deleteFolder(number);
+
       // 1. Apaga fisicamente as mensagens todas
       await this.prisma.message.deleteMany({ where: { contactNumber: number, instanceName } });
       
