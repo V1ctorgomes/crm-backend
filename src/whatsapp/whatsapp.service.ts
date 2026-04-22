@@ -56,6 +56,9 @@ export class WhatsappService {
     const waId = msgData.key.id ? String(msgData.key.id) : undefined;
     const pushName = msgData.pushName ? String(msgData.pushName) : contactNumber;
 
+    // CORREÇÃO: Verificamos se a mensagem já existe no banco de dados ANTES de fazer qualquer coisa pesada
+    const msgExists = waId ? await this.prisma.message.findUnique({ where: { id: waId } }) : null;
+
     const msg = msgData.message;
     let text = msg?.conversation || msg?.extendedTextMessage?.text || "";
 
@@ -74,20 +77,27 @@ export class WhatsappService {
       
       text = mediaObject.caption || text || (msg?.imageMessage ? "📷 Imagem" : msg?.documentMessage ? "📄 Documento" : msg?.audioMessage ? "🎵 Áudio" : "Mídia");
 
-      try {
-        const response = await axios.post(
-          `${this.apiUrl}/chat/getBase64FromMediaMessage/${instanceName}`,
-          { message: msgData },
-          { headers: { 'Content-Type': 'application/json', apikey: this.apiKey } }
-        );
+      // CORREÇÃO: O Segredo! Só baixamos e fazemos upload para a Cloudflare R2 se a mensagem for INÉDITA
+      if (!msgExists) {
+        try {
+          const response = await axios.post(
+            `${this.apiUrl}/chat/getBase64FromMediaMessage/${instanceName}`,
+            { message: msgData },
+            { headers: { 'Content-Type': 'application/json', apikey: this.apiKey } }
+          );
 
-        if (response.data && response.data.base64) {
-          const buffer = Buffer.from(String(response.data.base64), 'base64');
-          mediaUrl = await this.r2Service.uploadBuffer(buffer, fileName, mimeType, contactNumber);
+          if (response.data && response.data.base64) {
+            const buffer = Buffer.from(String(response.data.base64), 'base64');
+            mediaUrl = await this.r2Service.uploadBuffer(buffer, fileName, mimeType, contactNumber);
+          }
+        } catch (error) {
+          this.logger.error("Erro ao baixar mídia da Evolution", error);
+          text = "⚠️ [Falha ao salvar mídia na nuvem]";
         }
-      } catch (error) {
-        this.logger.error("Erro ao baixar mídia da Evolution", error);
-        text = "⚠️ [Falha ao salvar mídia na nuvem]";
+      } else {
+        // Se a mensagem já existir (ex: webhook ecoando uma mensagem que enviamos pelo CRM),
+        // nós reaproveitamos a URL que já está guardada no banco de dados.
+        mediaUrl = msgExists.mediaData || undefined;
       }
     }
 
@@ -120,7 +130,7 @@ export class WhatsappService {
         });
 
         if (waId) {
-          const msgExists = await this.prisma.message.findUnique({ where: { id: waId } });
+          // Se a mensagem for inédita, cria no banco. Se já existir, a lógica R2 já foi evitada.
           if (!msgExists) {
             await this.prisma.message.create({
               data: { 
@@ -254,7 +264,7 @@ export class WhatsappService {
     try {
       const instanceName = await this.getDefaultInstanceName();
       return await this.prisma.contact.findMany({ 
-        where: { instanceName }, // RETORNA TODOS OS CONTATOS DA INSTÂNCIA (Ativos e Inativos)
+        where: { instanceName }, 
         orderBy: { lastMessageTime: 'desc' } 
       });
     } catch { return []; }
@@ -271,7 +281,7 @@ export class WhatsappService {
     try {
       const instanceName = await this.getDefaultInstanceName();
       
-      // 0. NOVO: Apaga as mídias da Cloudflare R2 antes de limpar o banco!
+      // 0. Apaga as mídias da Cloudflare R2 antes de limpar o banco!
       await this.r2Service.deleteFolder(number);
 
       // 1. Apaga fisicamente as mensagens todas
