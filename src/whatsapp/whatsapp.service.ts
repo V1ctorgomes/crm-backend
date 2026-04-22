@@ -254,10 +254,7 @@ export class WhatsappService {
     try {
       const instanceName = await this.getDefaultInstanceName();
       return await this.prisma.contact.findMany({ 
-        where: { 
-          instanceName,
-          lastMessage: { not: '' } // OCULTA CONTACTOS APAGADOS
-        }, 
+        where: { instanceName }, // RETORNA TODOS OS CONTATOS DA INSTÂNCIA (Ativos e Inativos)
         orderBy: { lastMessageTime: 'desc' } 
       });
     } catch { return []; }
@@ -284,7 +281,6 @@ export class WhatsappService {
           data: { lastMessage: '', lastMessageTime: null } 
         });
       } catch (updateErr) {
-        // CORREÇÃO: Se o contacto ainda não existe na base (foi aberto pelo botão do CRM mas sem mensagem), ignoramos o erro e o sistema segue em frente.
       }
       
       return { success: true };
