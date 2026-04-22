@@ -164,8 +164,6 @@ export class WhatsappService {
       );
       const waId = response.data?.key?.id;
       
-      // NOVO: Garante que o contato existe no banco antes de criar a mensagem, 
-      // essencial para iniciar conversas novas a partir do CRM
       await this.prisma.contact.upsert({
         where: { number: number },
         update: { lastMessage: text, lastMessageTime: new Date(), instanceName },
@@ -255,7 +253,13 @@ export class WhatsappService {
   async getContacts() {
     try {
       const instanceName = await this.getDefaultInstanceName();
-      return await this.prisma.contact.findMany({ where: { instanceName }, orderBy: { lastMessageTime: 'desc' } });
+      return await this.prisma.contact.findMany({ 
+        where: { 
+          instanceName,
+          lastMessage: { not: '' } // OCULTA CONTACTOS "APAGADOS"
+        }, 
+        orderBy: { lastMessageTime: 'desc' } 
+      });
     } catch { return []; }
   }
 
@@ -269,11 +273,20 @@ export class WhatsappService {
   async deleteConversation(number: string) {
     try {
       const instanceName = await this.getDefaultInstanceName();
+      
+      // 1. Apaga fisicamente as mensagens todas
       await this.prisma.message.deleteMany({ where: { contactNumber: number, instanceName } });
-      await this.prisma.contact.update({ where: { number }, data: { lastMessage: '', lastMessageTime: null } });
+      
+      // 2. Não apaga o contacto! Apenas limpa a última mensagem para o ocultar da barra lateral
+      await this.prisma.contact.update({ 
+        where: { number }, 
+        data: { lastMessage: '', lastMessageTime: null } 
+      });
+      
       return { success: true };
-    } catch {
-      return { success: false };
+    } catch (e) {
+      this.logger.error('Erro ao excluir conversa', e);
+      throw new HttpException('Erro ao excluir', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }
