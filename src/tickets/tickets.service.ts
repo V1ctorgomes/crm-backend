@@ -28,6 +28,15 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
+  // NOVO: Busca o ticket ativo de um cliente específico pelo número de WhatsApp
+  async getTicketByContact(contactNumber: string) {
+    return this.prisma.ticket.findFirst({
+      where: { contactNumber, isArchived: false },
+      include: { contact: true, stage: true, notes: { orderBy: { createdAt: 'desc' } } },
+      orderBy: { createdAt: 'desc' } // Garante que pega o mais recente caso haja vários
+    });
+  }
+
   async getAllStages() {
     return this.prisma.stage.findMany({ orderBy: { order: 'asc' } });
   }

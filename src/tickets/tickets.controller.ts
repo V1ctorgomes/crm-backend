@@ -8,6 +8,12 @@ export class TicketsController {
   @Get('board')
   getBoard() { return this.ticketsService.getBoard(); }
 
+  // NOVO: Endpoint chamado pelo Frontend para ver se o cliente tem solicitação aberta
+  @Get('contact/:number')
+  getTicketByContact(@Param('number') number: string) {
+    return this.ticketsService.getTicketByContact(number);
+  }
+
   @Get('stages')
   getAllStages() { return this.ticketsService.getAllStages(); }
 
