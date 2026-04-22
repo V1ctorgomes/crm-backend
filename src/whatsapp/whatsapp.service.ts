@@ -256,7 +256,7 @@ export class WhatsappService {
       return await this.prisma.contact.findMany({ 
         where: { 
           instanceName,
-          lastMessage: { not: '' } // OCULTA CONTACTOS "APAGADOS"
+          lastMessage: { not: '' } // OCULTA CONTACTOS APAGADOS
         }, 
         orderBy: { lastMessageTime: 'desc' } 
       });
@@ -278,10 +278,14 @@ export class WhatsappService {
       await this.prisma.message.deleteMany({ where: { contactNumber: number, instanceName } });
       
       // 2. Não apaga o contacto! Apenas limpa a última mensagem para o ocultar da barra lateral
-      await this.prisma.contact.update({ 
-        where: { number }, 
-        data: { lastMessage: '', lastMessageTime: null } 
-      });
+      try {
+        await this.prisma.contact.update({ 
+          where: { number }, 
+          data: { lastMessage: '', lastMessageTime: null } 
+        });
+      } catch (updateErr) {
+        // CORREÇÃO: Se o contacto ainda não existe na base (foi aberto pelo botão do CRM mas sem mensagem), ignoramos o erro e o sistema segue em frente.
+      }
       
       return { success: true };
     } catch (e) {
