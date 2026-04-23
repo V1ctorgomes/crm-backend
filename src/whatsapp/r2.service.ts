@@ -18,13 +18,13 @@ export class R2Service {
     });
   }
 
-  // 1. Upload de ficheiros enviados do seu Frontend para o cliente
   async uploadFile(file: any, folderName: string): Promise<string> {
     try {
       const safeFile = file as any;
       const fileExtension = String(safeFile.originalname || '').split('.').pop() || 'bin';
       const cleanName = String(safeFile.originalname || '').replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
-      const cleanFolder = String(folderName).replace(/\D/g, ''); 
+      // Permite o uso de barras para subpastas de tickets
+      const cleanFolder = String(folderName).replace(/[^a-zA-Z0-9_/-]/g, ''); 
       const uniqueKey = `${cleanFolder}/${randomUUID()}-${cleanName}.${fileExtension}`;
 
       const command = new PutObjectCommand({
@@ -42,7 +42,6 @@ export class R2Service {
     }
   }
 
-  // 2. Upload de ficheiros recebidos do WhatsApp (Evolution API)
   async uploadBuffer(buffer: Buffer, originalName: string, mimeType: string, folderName: string): Promise<string> {
     try {
       const fileExtension = originalName.split('.').pop() || 'bin';
@@ -65,15 +64,28 @@ export class R2Service {
     }
   }
 
-  // 3. NOVO: Apagar todos os ficheiros de um cliente (pasta inteira)
+  // Apaga um arquivo único usando a sua URL pública
+  async deleteFile(fileUrl: string): Promise<void> {
+    try {
+      const url = new URL(fileUrl);
+      const key = url.pathname.substring(1); // Remove a barra inicial
+      const command = new DeleteObjectsCommand({
+        Bucket: process.env.R2_BUCKET_NAME!,
+        Delete: { Objects: [{ Key: key }] },
+      });
+      await this.s3Client.send(command);
+    } catch (error) {
+      console.error('Erro ao deletar ficheiro único do R2:', error);
+    }
+  }
+
   async deleteFolder(folderName: string): Promise<void> {
     try {
-      const cleanFolder = folderName.replace(/\D/g, '');
+      const cleanFolder = folderName.replace(/[^a-zA-Z0-9_/-]/g, '');
       const prefix = `${cleanFolder}/`;
       let isTruncated = true;
       let continuationToken: string | undefined = undefined;
 
-      // Loop para garantir que apaga tudo, mesmo se houver mais de 1000 ficheiros
       while (isTruncated) {
         const listCommand = new ListObjectsV2Command({
           Bucket: process.env.R2_BUCKET_NAME!,
@@ -84,13 +96,12 @@ export class R2Service {
         const listedObjects = await this.s3Client.send(listCommand);
 
         if (!listedObjects.Contents || listedObjects.Contents.length === 0) {
-          break; // A pasta já está vazia ou não existe
+          break; 
         }
 
         const deleteParams = {
           Bucket: process.env.R2_BUCKET_NAME!,
           Delete: {
-            // CORREÇÃO AQUI: Garante que só passa itens válidos e força o tipo para o TS não reclamar
             Objects: listedObjects.Contents
               .filter(item => item.Key !== undefined)
               .map(item => ({ Key: item.Key as string })),
@@ -103,11 +114,8 @@ export class R2Service {
         isTruncated = listedObjects.IsTruncated ?? false;
         continuationToken = listedObjects.NextContinuationToken;
       }
-      
-      console.log(`Todos os ficheiros da pasta ${prefix} foram apagados do R2 com sucesso.`);
     } catch (error) {
-      console.error('Erro ao deletar pasta no R2 (pode não existir):', error);
-      // Não lançamos erro aqui para não impedir que o banco de dados seja limpo caso o R2 falhe
+      console.error('Erro ao deletar pasta no R2:', error);
     }
   }
 }

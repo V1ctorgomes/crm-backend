@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
-import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { TicketsController } from './tickets.controller';
+import { PrismaModule } from '../prisma/prisma.module';
+import { R2Service } from '../whatsapp/r2.service';
 
 @Module({
+  imports: [PrismaModule],
+  providers: [TicketsService, R2Service],
   controllers: [TicketsController],
-  providers: [TicketsService, PrismaService],
 })
 export class TicketsModule {}

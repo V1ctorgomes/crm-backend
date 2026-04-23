@@ -1,9 +1,10 @@
 import { Injectable, OnModuleInit, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { R2Service } from '../whatsapp/r2.service';
 
 @Injectable()
 export class TicketsService implements OnModuleInit {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private r2Service: R2Service) {}
 
   async onModuleInit() {
     const count = await this.prisma.stage.count();
@@ -28,12 +29,61 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  // NOVO: Busca o ticket ativo de um cliente específico pelo número de WhatsApp
+  // Busca todas as OS agrupadas por Cliente para formar as Pastas
+  async getFolders() {
+    const tickets = await this.prisma.ticket.findMany({
+      where: { isArchived: false },
+      include: {
+        contact: true,
+        files: { orderBy: { createdAt: 'desc' } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const map = new Map();
+    for (const t of tickets) {
+      if (!map.has(t.contactNumber)) {
+        map.set(t.contactNumber, {
+          contact: t.contact,
+          tickets: []
+        });
+      }
+      map.get(t.contactNumber).tickets.push(t);
+    }
+    return Array.from(map.values());
+  }
+
+  async uploadTicketFile(ticketId: string, file: any) {
+    if (!file) throw new HttpException('Arquivo ausente', HttpStatus.BAD_REQUEST);
+    
+    const fileUrl = await this.r2Service.uploadFile(file, `tickets/${ticketId}`);
+    const safeName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
+    return this.prisma.ticketFile.create({
+      data: {
+        ticketId,
+        fileName: safeName,
+        fileUrl,
+        mimeType: file.mimetype,
+        size: file.size
+      }
+    });
+  }
+
+  async deleteTicketFile(fileId: string) {
+    const file = await this.prisma.ticketFile.findUnique({ where: { id: fileId } });
+    if (file) {
+       await this.r2Service.deleteFile(file.fileUrl);
+       await this.prisma.ticketFile.delete({ where: { id: fileId } });
+    }
+    return { success: true };
+  }
+
   async getTicketByContact(contactNumber: string) {
     return this.prisma.ticket.findFirst({
       where: { contactNumber, isArchived: false },
       include: { contact: true, stage: true, notes: { orderBy: { createdAt: 'desc' } } },
-      orderBy: { createdAt: 'desc' } // Garante que pega o mais recente caso haja vários
+      orderBy: { createdAt: 'desc' } 
     });
   }
 
@@ -51,9 +101,7 @@ export class TicketsService implements OnModuleInit {
 
   async createStage(name: string, color: string) {
     const count = await this.prisma.stage.count();
-    return this.prisma.stage.create({
-      data: { name, color: color || '#e2e8f0', order: count + 1 }
-    });
+    return this.prisma.stage.create({ data: { name, color: color || '#e2e8f0', order: count + 1 } });
   }
 
   async updateStage(id: string, data: { name?: string; color?: string; isActive?: boolean }) {
@@ -61,23 +109,17 @@ export class TicketsService implements OnModuleInit {
   }
 
   async deleteStage(id: string) {
-    // PROTEÇÃO: Verifica se há solicitações dentro da fase
     const stage = await this.prisma.stage.findUnique({
-      where: { id },
-      include: { _count: { select: { tickets: true } } }
+      where: { id }, include: { _count: { select: { tickets: true } } }
     });
-
     if (stage && stage._count.tickets > 0) {
-      throw new HttpException('Não é possível apagar uma fase que contém solicitações. Mova ou arquive-as primeiro.', HttpStatus.BAD_REQUEST);
+      throw new HttpException('Não é possível apagar uma fase que contém solicitações.', HttpStatus.BAD_REQUEST);
     }
-
     return this.prisma.stage.delete({ where: { id } });
   }
 
   async reorderStages(stages: { id: string; order: number }[]) {
-    const updates = stages.map(s => 
-      this.prisma.stage.update({ where: { id: s.id }, data: { order: s.order } })
-    );
+    const updates = stages.map(s => this.prisma.stage.update({ where: { id: s.id }, data: { order: s.order } }));
     return this.prisma.$transaction(updates);
   }
 
@@ -86,14 +128,8 @@ export class TicketsService implements OnModuleInit {
       where: { number: data.contactNumber },
       data: { name: data.nome, email: data.email, cnpj: data.cpf }
     });
-
     return this.prisma.ticket.create({
-      data: {
-        contactNumber: data.contactNumber,
-        stageId: data.stageId,
-        marca: data.marca,
-        modelo: data.modelo
-      },
+      data: { contactNumber: data.contactNumber, stageId: data.stageId, marca: data.marca, modelo: data.modelo },
       include: { contact: true, notes: true }
     });
   }

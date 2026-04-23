@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { TicketsService } from './tickets.service';
 
 @Controller('tickets')
@@ -8,7 +9,9 @@ export class TicketsController {
   @Get('board')
   getBoard() { return this.ticketsService.getBoard(); }
 
-  // NOVO: Endpoint chamado pelo Frontend para ver se o cliente tem solicitação aberta
+  @Get('folders')
+  getFolders() { return this.ticketsService.getFolders(); }
+
   @Get('contact/:number')
   getTicketByContact(@Param('number') number: string) {
     return this.ticketsService.getTicketByContact(number);
@@ -43,6 +46,17 @@ export class TicketsController {
   @Post()
   createTicket(@Body() body: any) {
     return this.ticketsService.createTicket(body);
+  }
+
+  @Post(':id/files')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadTicketFile(@Param('id') id: string, @UploadedFile() file: any) {
+    return this.ticketsService.uploadTicketFile(id, file);
+  }
+
+  @Delete('files/:fileId')
+  deleteTicketFile(@Param('fileId') fileId: string) {
+    return this.ticketsService.deleteTicketFile(fileId);
   }
 
   @Put(':id/stage')
