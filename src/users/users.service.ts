@@ -1,43 +1,44 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import * as bcrypt from 'bcrypt';
+import { R2Service } from '../whatsapp/r2.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private r2Service: R2Service) {}
 
   async findAll() {
-    return this.prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
-      orderBy: { createdAt: 'desc' }
-    });
+    return this.prisma.user.findMany();
+  }
+
+  async findOne(id: string) {
+    return this.prisma.user.findUnique({ where: { id } });
   }
 
   async create(data: any) {
-    const exists = await this.prisma.user.findUnique({ where: { email: data.email } });
-    if (exists) throw new HttpException('Email já está em uso', HttpStatus.BAD_REQUEST);
-    
-    const hashedPassword = await bcrypt.hash(data.password, 10);
-    return this.prisma.user.create({
-      data: { name: data.name, email: data.email, password: hashedPassword, role: data.role },
-      select: { id: true, name: true, email: true, role: true }
-    });
+    return this.prisma.user.create({ data });
   }
 
-  async update(id: string, data: any) {
-    const updateData: any = { name: data.name, email: data.email, role: data.role };
+  // Lógica principal de atualização do Perfil com foto
+  async updateUser(id: string, data: any, file?: any) {
+    const updateData: any = {};
     
+    if (data.name) updateData.name = data.name;
+    if (data.email) updateData.email = data.email;
     if (data.password && data.password.trim() !== '') {
-      updateData.password = await bcrypt.hash(data.password, 10);
+      updateData.password = data.password;
+    }
+
+    if (file) {
+      updateData.profilePictureUrl = await this.r2Service.uploadFile(file, `profiles/${id}`);
     }
 
     return this.prisma.user.update({
-      where: { id }, data: updateData,
-      select: { id: true, name: true, email: true, role: true }
+      where: { id },
+      data: updateData,
     });
   }
 
-  async remove(id: string) {
+  async delete(id: string) {
     return this.prisma.user.delete({ where: { id } });
   }
 }

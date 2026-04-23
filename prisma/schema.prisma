@@ -8,14 +8,15 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(uuid())
-  email     String     @unique
-  name      String
-  password  String   
-  role      String     @default("USER")
-  instances Instance[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id                String     @id @default(uuid())
+  email             String     @unique
+  name              String
+  password          String   
+  profilePictureUrl String?    // NOVO: Campo para a foto de perfil
+  role              String     @default("USER")
+  instances         Instance[]
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   @@map("users")
 }
@@ -96,7 +97,7 @@ model Ticket {
   modelo        String?
   isArchived    Boolean  @default(false)
   notes         Note[]
-  files         TicketFile[] // Nova relação para os arquivos!
+  files         TicketFile[] 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -109,15 +110,14 @@ model Note {
   createdAt DateTime @default(now())
 }
 
-// Novo modelo para armazenar os arquivos das OS
 model TicketFile {
-  id        String   @id @default(uuid())
-  ticketId  String
-  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  fileName  String
-  fileUrl   String
-  mimeType  String
-  size      Int
-  description String?  @db.Text // NOVO CAMPO DE DESCRIÇÃO
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fileName    String
+  fileUrl     String
+  mimeType    String
+  size        Int
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
 }
