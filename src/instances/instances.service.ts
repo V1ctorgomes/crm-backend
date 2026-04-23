@@ -23,43 +23,40 @@ export class InstancesService {
     if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
 
     try {
-      // 1. Preparar o Payload da Evolution V2
+      // 1. Preparar o Payload da Evolution V2 com Proxy embutido
       const payload: any = {
         instanceName: data.name,
-        qrcode: true,
+        qrcode: false, 
         integration: "WHATSAPP-BAILEYS"
       };
 
-      // CORREÇÃO AQUI: Enviar os dados do proxy para a Evolution (Padrão V2)
+      // Injeção do Proxy de acordo com documentação V2
       if (data.proxyHost && data.proxyPort) {
         payload.proxy = {
           host: data.proxyHost,
           port: parseInt(data.proxyPort, 10),
-          protocol: data.proxyProto || "http"
+          protocol: data.proxyProto || "http",
+          enabled: true
         };
         
-        // Adiciona usuário e senha se existirem
         if (data.proxyUser && data.proxyPass) {
           payload.proxy.username = data.proxyUser;
           payload.proxy.password = data.proxyPass;
         }
       }
 
-      // 2. Criar a Instância
+      // Criar Instância
       await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
+      this.logger.log(`Instância ${data.name} criada com sucesso na Evolution API.`);
 
-      this.logger.log(`Instância ${data.name} criada. Aguardando para configurar webhook...`);
-
-      // 3. Pequena espera (2 segundos) para a Evolution processar a criação
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // 4. Configurar Webhook (Formato exato Evolution v2)
+      // 2. Configurar Webhook
       if (this.webhookUrl) {
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Pequeno delay de segurança
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
           webhook: {
             enabled: true,
             url: this.webhookUrl,
-            byEvents: false, // Na v2 mudou de webhookByEvents para byEvents
+            byEvents: false, 
             base64: false,
             events: [
               "MESSAGES_UPSERT",
@@ -70,21 +67,26 @@ export class InstancesService {
             ]
           }
         }, { headers: { apikey: this.evoKey } });
-        this.logger.log(`Webhook ativado para ${data.name}`);
       }
 
-      // 5. Salvar no Banco
+      // 3. Salvar no Banco de Dados local
       return await this.prisma.instance.create({ 
         data: {
-          name: data.name, userId: data.userId,
-          rejectCalls: data.rejectCalls || false, ignoreGroups: data.ignoreGroups || false,
-          proxyHost: data.proxyHost, proxyPort: data.proxyPort, proxyUser: data.proxyUser, proxyPass: data.proxyPass, proxyProto: data.proxyProto
+          name: data.name, 
+          userId: data.userId,
+          rejectCalls: data.rejectCalls || false, 
+          ignoreGroups: data.ignoreGroups || false,
+          proxyHost: data.proxyHost || null, 
+          proxyPort: data.proxyPort || null, 
+          proxyUser: data.proxyUser || null, 
+          proxyPass: data.proxyPass || null, 
+          proxyProto: data.proxyProto || 'http'
         } 
       });
 
     } catch (error: any) {
-      const msg = error?.response?.data?.message || error.message;
-      this.logger.error(`Erro na criação/webhook: ${msg}`);
+      const msg = error?.response?.data?.message || error?.response?.data?.error || error.message;
+      this.logger.error(`Erro na criação: ${msg}`);
       throw new HttpException(`Erro Evolution: ${msg}`, HttpStatus.BAD_REQUEST);
     }
   }
@@ -102,7 +104,10 @@ export class InstancesService {
     try {
       const res = await axios.get(`${this.evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: this.evoKey } });
       return res.data;
-    } catch (e) { throw new HttpException('QR Indisponível', HttpStatus.BAD_REQUEST); }
+    } catch (error: any) { 
+      const msg = error?.response?.data?.message || "Serviço Indisponível";
+      throw new HttpException(msg, HttpStatus.BAD_REQUEST); 
+    }
   }
 
   async updateSettings(instanceName: string, data: any) {
