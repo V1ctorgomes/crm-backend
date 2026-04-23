@@ -23,41 +23,43 @@ export class InstancesService {
     if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
 
     try {
-      // 1. Criar a Instância (SEM qrcode, para não iniciar a conexão com o IP nativo do servidor)
+      // 1. Preparar o Payload da Evolution V2
       const payload: any = {
         instanceName: data.name,
-        qrcode: false, 
+        qrcode: true,
         integration: "WHATSAPP-BAILEYS"
       };
 
-      await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
-      this.logger.log(`Instância ${data.name} criada. A injetar o Proxy...`);
-
-      // 2. Configurar o Proxy (SE EXISTIR) através da rota oficial da v2
+      // CORREÇÃO AQUI: Enviar os dados do proxy para a Evolution (Padrão V2)
       if (data.proxyHost && data.proxyPort) {
-        const proxyPayload: any = {
+        payload.proxy = {
           host: data.proxyHost,
           port: parseInt(data.proxyPort, 10),
           protocol: data.proxyProto || "http"
         };
         
+        // Adiciona usuário e senha se existirem
         if (data.proxyUser && data.proxyPass) {
-          proxyPayload.username = data.proxyUser;
-          proxyPayload.password = data.proxyPass;
+          payload.proxy.username = data.proxyUser;
+          payload.proxy.password = data.proxyPass;
         }
-
-        // Rota oficial da v2 para Set de Proxy
-        await axios.post(`${this.evoUrl}/proxy/set/${data.name}`, proxyPayload, { headers: { apikey: this.evoKey } });
-        this.logger.log(`[SUCESSO] Proxy ativado para a instância ${data.name}`);
       }
 
-      // 3. Configurar Webhook
+      // 2. Criar a Instância
+      await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
+
+      this.logger.log(`Instância ${data.name} criada. Aguardando para configurar webhook...`);
+
+      // 3. Pequena espera (2 segundos) para a Evolution processar a criação
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // 4. Configurar Webhook (Formato exato Evolution v2)
       if (this.webhookUrl) {
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
           webhook: {
             enabled: true,
             url: this.webhookUrl,
-            byEvents: false, 
+            byEvents: false, // Na v2 mudou de webhookByEvents para byEvents
             base64: false,
             events: [
               "MESSAGES_UPSERT",
@@ -71,28 +73,18 @@ export class InstancesService {
         this.logger.log(`Webhook ativado para ${data.name}`);
       }
 
-      // 4. Salvar no Banco de Dados
+      // 5. Salvar no Banco
       return await this.prisma.instance.create({ 
         data: {
-          name: data.name, 
-          userId: data.userId,
-          rejectCalls: data.rejectCalls || false, 
-          ignoreGroups: data.ignoreGroups || false,
-          proxyHost: data.proxyHost || null, 
-          proxyPort: data.proxyPort || null, 
-          proxyUser: data.proxyUser || null, 
-          proxyPass: data.proxyPass || null, 
-          proxyProto: data.proxyProto || 'http'
+          name: data.name, userId: data.userId,
+          rejectCalls: data.rejectCalls || false, ignoreGroups: data.ignoreGroups || false,
+          proxyHost: data.proxyHost, proxyPort: data.proxyPort, proxyUser: data.proxyUser, proxyPass: data.proxyPass, proxyProto: data.proxyProto
         } 
       });
 
     } catch (error: any) {
-      const msg = error?.response?.data?.message || error?.response?.data?.error || error.message;
-      this.logger.error(`Erro na criação da instância ou Proxy: ${msg}`);
-      
-      // Rollback: Apaga a instância "meio feita" na API caso a injeção do proxy ou webhook tenha falhado
-      try { await axios.delete(`${this.evoUrl}/instance/delete/${data.name}`, { headers: { apikey: this.evoKey } }); } catch(e) {}
-      
+      const msg = error?.response?.data?.message || error.message;
+      this.logger.error(`Erro na criação/webhook: ${msg}`);
       throw new HttpException(`Erro Evolution: ${msg}`, HttpStatus.BAD_REQUEST);
     }
   }
@@ -108,7 +100,6 @@ export class InstancesService {
 
   async getQrCode(instanceName: string) {
     try {
-      // Como a instância foi criada sem qrcode:true, chamamos o connect agora para gerar.
       const res = await axios.get(`${this.evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: this.evoKey } });
       return res.data;
     } catch (e) { throw new HttpException('QR Indisponível', HttpStatus.BAD_REQUEST); }
