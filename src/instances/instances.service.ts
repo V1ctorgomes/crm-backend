@@ -23,19 +23,37 @@ export class InstancesService {
     if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
 
     try {
-      // 1. Criar a Instância
-      await axios.post(`${this.evoUrl}/instance/create`, {
+      // 1. Preparar o Payload da Evolution V2
+      const payload: any = {
         instanceName: data.name,
         qrcode: true,
         integration: "WHATSAPP-BAILEYS"
-      }, { headers: { apikey: this.evoKey } });
+      };
+
+      // CORREÇÃO AQUI: Enviar os dados do proxy para a Evolution (Padrão V2)
+      if (data.proxyHost && data.proxyPort) {
+        payload.proxy = {
+          host: data.proxyHost,
+          port: parseInt(data.proxyPort, 10),
+          protocol: data.proxyProto || "http"
+        };
+        
+        // Adiciona usuário e senha se existirem
+        if (data.proxyUser && data.proxyPass) {
+          payload.proxy.username = data.proxyUser;
+          payload.proxy.password = data.proxyPass;
+        }
+      }
+
+      // 2. Criar a Instância
+      await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
 
       this.logger.log(`Instância ${data.name} criada. Aguardando para configurar webhook...`);
 
-      // 2. Pequena espera (2 segundos) para a Evolution processar a criação
+      // 3. Pequena espera (2 segundos) para a Evolution processar a criação
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // 3. Configurar Webhook (Formato exato Evolution v2)
+      // 4. Configurar Webhook (Formato exato Evolution v2)
       if (this.webhookUrl) {
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
           webhook: {
@@ -55,7 +73,7 @@ export class InstancesService {
         this.logger.log(`Webhook ativado para ${data.name}`);
       }
 
-      // 4. Salvar no Banco
+      // 5. Salvar no Banco
       return await this.prisma.instance.create({ 
         data: {
           name: data.name, userId: data.userId,
