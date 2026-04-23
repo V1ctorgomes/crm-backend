@@ -23,20 +23,19 @@ export class InstancesService {
     if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
 
     try {
-      // 1. Preparar o Payload da Evolution V2 com Proxy embutido
+      // 1. Criar a estrutura Base
       const payload: any = {
         instanceName: data.name,
         qrcode: false, 
         integration: "WHATSAPP-BAILEYS"
       };
 
-      // Injeção do Proxy de acordo com documentação V2
+      // CORREÇÃO: Formato exato do Proxy para Evolution V2 (Objeto embutido na criação)
       if (data.proxyHost && data.proxyPort) {
         payload.proxy = {
           host: data.proxyHost,
           port: parseInt(data.proxyPort, 10),
-          protocol: data.proxyProto || "http",
-          enabled: true
+          protocol: data.proxyProto || "http"
         };
         
         if (data.proxyUser && data.proxyPass) {
@@ -45,13 +44,13 @@ export class InstancesService {
         }
       }
 
-      // Criar Instância
+      // 2. Disparar pedido de criação para a Evolution
       await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
-      this.logger.log(`Instância ${data.name} criada com sucesso na Evolution API.`);
+      this.logger.log(`Instância ${data.name} criada com sucesso na Evolution API v2.`);
 
-      // 2. Configurar Webhook
+      // 3. Pequena espera e configuração do Webhook
       if (this.webhookUrl) {
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Pequeno delay de segurança
+        await new Promise(resolve => setTimeout(resolve, 1500));
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
           webhook: {
             enabled: true,
@@ -69,7 +68,7 @@ export class InstancesService {
         }, { headers: { apikey: this.evoKey } });
       }
 
-      // 3. Salvar no Banco de Dados local
+      // 4. Salvar no Banco de Dados local
       return await this.prisma.instance.create({ 
         data: {
           name: data.name, 
