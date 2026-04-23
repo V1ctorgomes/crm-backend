@@ -56,7 +56,6 @@ export class WhatsappService {
     const waId = msgData.key.id ? String(msgData.key.id) : undefined;
     const pushName = msgData.pushName ? String(msgData.pushName) : contactNumber;
 
-    // CORREÇÃO: Verificamos se a mensagem já existe no banco de dados ANTES de fazer qualquer coisa pesada
     const msgExists = waId ? await this.prisma.message.findUnique({ where: { id: waId } }) : null;
 
     const msg = msgData.message;
@@ -77,7 +76,6 @@ export class WhatsappService {
       
       text = mediaObject.caption || text || (msg?.imageMessage ? "📷 Imagem" : msg?.documentMessage ? "📄 Documento" : msg?.audioMessage ? "🎵 Áudio" : "Mídia");
 
-      // CORREÇÃO: O Segredo! Só baixamos e fazemos upload para a Cloudflare R2 se a mensagem for INÉDITA
       if (!msgExists) {
         try {
           const response = await axios.post(
@@ -95,8 +93,6 @@ export class WhatsappService {
           text = "⚠️ [Falha ao salvar mídia na nuvem]";
         }
       } else {
-        // Se a mensagem já existir (ex: webhook ecoando uma mensagem que enviamos pelo CRM),
-        // nós reaproveitamos a URL que já está guardada no banco de dados.
         mediaUrl = msgExists.mediaData || undefined;
       }
     }
@@ -130,7 +126,6 @@ export class WhatsappService {
         });
 
         if (waId) {
-          // Se a mensagem for inédita, cria no banco. Se já existir, a lógica R2 já foi evitada.
           if (!msgExists) {
             await this.prisma.message.create({
               data: { 
@@ -262,9 +257,8 @@ export class WhatsappService {
 
   async getContacts() {
     try {
-      const instanceName = await this.getDefaultInstanceName();
+      // CORREÇÃO: Removemos o filtro rígido de instância para listar TODOS os contactos salvos no banco.
       return await this.prisma.contact.findMany({ 
-        where: { instanceName }, 
         orderBy: { lastMessageTime: 'desc' } 
       });
     } catch { return []; }
@@ -272,22 +266,22 @@ export class WhatsappService {
 
   async getChatHistory(number: string) {
     try {
-      const instanceName = await this.getDefaultInstanceName();
-      return await this.prisma.message.findMany({ where: { contactNumber: number, instanceName }, orderBy: { timestamp: 'asc' } });
+      // CORREÇÃO: Puxa o histórico de conversa do número, independente de qual instância foi usada no passado.
+      return await this.prisma.message.findMany({ 
+        where: { contactNumber: number }, 
+        orderBy: { timestamp: 'asc' } 
+      });
     } catch { return []; }
   }
 
   async deleteConversation(number: string) {
     try {
-      const instanceName = await this.getDefaultInstanceName();
-      
-      // 0. Apaga as mídias da Cloudflare R2 antes de limpar o banco!
       await this.r2Service.deleteFolder(number);
 
-      // 1. Apaga fisicamente as mensagens todas
-      await this.prisma.message.deleteMany({ where: { contactNumber: number, instanceName } });
+      await this.prisma.message.deleteMany({ 
+        where: { contactNumber: number } 
+      });
       
-      // 2. Não apaga o contacto! Apenas limpa a última mensagem para o ocultar da barra lateral
       try {
         await this.prisma.contact.update({ 
           where: { number }, 
