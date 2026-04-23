@@ -25,7 +25,7 @@ export class TicketsService implements OnModuleInit {
           include: { 
             contact: true, 
             notes: { orderBy: { createdAt: 'desc' } },
-            files: { orderBy: { createdAt: 'desc' } } // ADICIONADO AQUI
+            files: { orderBy: { createdAt: 'desc' } } 
           },
           orderBy: { createdAt: 'desc' }
         }
@@ -34,8 +34,8 @@ export class TicketsService implements OnModuleInit {
   }
 
   async getFolders() {
+    // CORREÇÃO: Removemos o filtro "isArchived" para as OS arquivadas irem para a tela de Arquivos
     const tickets = await this.prisma.ticket.findMany({
-      where: { isArchived: false },
       include: {
         contact: true,
         files: { orderBy: { createdAt: 'desc' } }
@@ -83,6 +83,15 @@ export class TicketsService implements OnModuleInit {
     return { success: true };
   }
 
+  // NOVO: Exclusão definitiva de uma OS (Apaga Arquivos na Nuvem + Dados no Banco)
+  async deleteTicket(id: string) {
+    // 1. Apaga tudo dentro da pasta dessa OS na Cloudflare R2
+    await this.r2Service.deleteFolder(`tickets/${id}`);
+    
+    // 2. Apaga do banco de dados (o Prisma já cuida de apagar notas e os registros dos ficheiros devido ao Cascade)
+    return this.prisma.ticket.delete({ where: { id } });
+  }
+
   async getTicketByContact(contactNumber: string) {
     return this.prisma.ticket.findFirst({
       where: { contactNumber, isArchived: false },
@@ -90,7 +99,7 @@ export class TicketsService implements OnModuleInit {
         contact: true, 
         stage: true, 
         notes: { orderBy: { createdAt: 'desc' } },
-        files: { orderBy: { createdAt: 'desc' } } // ADICIONADO AQUI
+        files: { orderBy: { createdAt: 'desc' } } 
       },
       orderBy: { createdAt: 'desc' } 
     });
@@ -107,7 +116,7 @@ export class TicketsService implements OnModuleInit {
         contact: true, 
         stage: true, 
         notes: { orderBy: { createdAt: 'desc' } },
-        files: { orderBy: { createdAt: 'desc' } } // ADICIONADO AQUI
+        files: { orderBy: { createdAt: 'desc' } } 
       },
       orderBy: { updatedAt: 'desc' }
     });

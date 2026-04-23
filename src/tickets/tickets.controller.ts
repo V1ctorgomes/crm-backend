@@ -48,6 +48,12 @@ export class TicketsController {
     return this.ticketsService.createTicket(body);
   }
 
+  // NOVO: Endpoint para excluir a OS por completo
+  @Delete(':id')
+  deleteTicket(@Param('id') id: string) {
+    return this.ticketsService.deleteTicket(id);
+  }
+
   @Post(':id/files')
   @UseInterceptors(FileInterceptor('file'))
   uploadTicketFile(@Param('id') id: string, @UploadedFile() file: any, @Body('description') description?: string) {
