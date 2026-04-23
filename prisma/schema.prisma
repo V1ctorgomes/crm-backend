@@ -118,5 +118,6 @@ model TicketFile {
   fileUrl   String
   mimeType  String
   size      Int
+  description String?  @db.Text // NOVO CAMPO DE DESCRIÇÃO
   createdAt DateTime @default(now())
 }

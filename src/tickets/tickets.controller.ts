@@ -50,8 +50,8 @@ export class TicketsController {
 
   @Post(':id/files')
   @UseInterceptors(FileInterceptor('file'))
-  uploadTicketFile(@Param('id') id: string, @UploadedFile() file: any) {
-    return this.ticketsService.uploadTicketFile(id, file);
+  uploadTicketFile(@Param('id') id: string, @UploadedFile() file: any, @Body('description') description?: string) {
+    return this.ticketsService.uploadTicketFile(id, file, description);
   }
 
   @Delete('files/:fileId')

@@ -22,14 +22,17 @@ export class TicketsService implements OnModuleInit {
       include: {
         tickets: {
           where: { isArchived: false },
-          include: { contact: true, notes: { orderBy: { createdAt: 'desc' } } },
+          include: { 
+            contact: true, 
+            notes: { orderBy: { createdAt: 'desc' } },
+            files: { orderBy: { createdAt: 'desc' } } // ADICIONADO AQUI
+          },
           orderBy: { createdAt: 'desc' }
         }
       }
     });
   }
 
-  // Busca todas as OS agrupadas por Cliente para formar as Pastas
   async getFolders() {
     const tickets = await this.prisma.ticket.findMany({
       where: { isArchived: false },
@@ -53,7 +56,7 @@ export class TicketsService implements OnModuleInit {
     return Array.from(map.values());
   }
 
-  async uploadTicketFile(ticketId: string, file: any) {
+  async uploadTicketFile(ticketId: string, file: any, description?: string) {
     if (!file) throw new HttpException('Arquivo ausente', HttpStatus.BAD_REQUEST);
     
     const fileUrl = await this.r2Service.uploadFile(file, `tickets/${ticketId}`);
@@ -65,7 +68,8 @@ export class TicketsService implements OnModuleInit {
         fileName: safeName,
         fileUrl,
         mimeType: file.mimetype,
-        size: file.size
+        size: file.size,
+        description: description || null
       }
     });
   }
@@ -82,7 +86,12 @@ export class TicketsService implements OnModuleInit {
   async getTicketByContact(contactNumber: string) {
     return this.prisma.ticket.findFirst({
       where: { contactNumber, isArchived: false },
-      include: { contact: true, stage: true, notes: { orderBy: { createdAt: 'desc' } } },
+      include: { 
+        contact: true, 
+        stage: true, 
+        notes: { orderBy: { createdAt: 'desc' } },
+        files: { orderBy: { createdAt: 'desc' } } // ADICIONADO AQUI
+      },
       orderBy: { createdAt: 'desc' } 
     });
   }
@@ -94,7 +103,12 @@ export class TicketsService implements OnModuleInit {
   async getArchivedTickets() {
     return this.prisma.ticket.findMany({
       where: { isArchived: true },
-      include: { contact: true, stage: true, notes: { orderBy: { createdAt: 'desc' } } },
+      include: { 
+        contact: true, 
+        stage: true, 
+        notes: { orderBy: { createdAt: 'desc' } },
+        files: { orderBy: { createdAt: 'desc' } } // ADICIONADO AQUI
+      },
       orderBy: { updatedAt: 'desc' }
     });
   }
@@ -130,7 +144,7 @@ export class TicketsService implements OnModuleInit {
     });
     return this.prisma.ticket.create({
       data: { contactNumber: data.contactNumber, stageId: data.stageId, marca: data.marca, modelo: data.modelo },
-      include: { contact: true, notes: true }
+      include: { contact: true, notes: true, files: true }
     });
   }
 
