@@ -5,25 +5,48 @@ import axios from 'axios';
 @Injectable()
 export class InstancesService {
   private readonly logger = new Logger(InstancesService.name);
-  private readonly evoUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
-  private readonly evoKey = process.env.EVOLUTION_API_KEY;
+  
+  // O webhookUrl mantém-se no .env pois é o endereço do próprio CRM
   private readonly webhookUrl = process.env.WEBHOOK_URL; 
 
   constructor(private prisma: PrismaService) {}
 
+  // Função auxiliar para buscar as credenciais da Evolution diretamente da Base de Dados
+  private async getEvolutionCredentials() {
+    const provider = await this.prisma.provider.findUnique({ where: { name: 'evolution' } });
+    
+    if (!provider || !provider.baseUrl || !provider.apiKey) {
+      throw new HttpException(
+        'Configurações da Evolution API não encontradas. Por favor, configure-as na página Developer.', 
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    return {
+      evoUrl: provider.baseUrl.replace(/\/$/, ''),
+      evoKey: provider.apiKey
+    };
+  }
+
   async findByUser(userId: string) {
     const instances = await this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
-    for (const inst of instances) {
-      await this.checkStatus(inst.name);
+    
+    try {
+      for (const inst of instances) {
+        await this.checkStatus(inst.name);
+      }
+    } catch (e) {
+      this.logger.warn('Não foi possível verificar o status das instâncias. Verifique as credenciais da API.');
     }
+    
     return this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
   }
 
   async create(data: any) {
-    if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
+    // 1. Vai buscar as credenciais atualizadas à BD
+    const { evoUrl, evoKey } = await this.getEvolutionCredentials();
 
     try {
-      // 1. Criar a estrutura Base EXATAMENTE como a v2 exige (Sem injetar o proxy aqui para não dar erro Zod)
       const payload: any = {
         instanceName: data.name,
         qrcode: false, 
@@ -31,17 +54,15 @@ export class InstancesService {
       };
 
       // 2. Disparar pedido de criação para a Evolution
-      await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
+      await axios.post(`${evoUrl}/instance/create`, payload, { headers: { apikey: evoKey } });
       this.logger.log(`Instância ${data.name} criada com sucesso na Evolution API v2.`);
 
-      // 3. Forçar a configuração do Proxy através do endpoint dedicado (Formato Flat v2)
+      // 3. Forçar a configuração do Proxy através do endpoint dedicado
       if (data.proxyHost && data.proxyPort) {
-        
-        // A Evolution API v2 exige as propriedades "soltas" e não dentro de um objeto { proxy: {} }
         const proxySetPayload: any = {
           enabled: true,
           host: String(data.proxyHost).trim(),
-          port: String(data.proxyPort), // A API v2 documenta porta como String neste endpoint
+          port: String(data.proxyPort), 
           protocol: String(data.proxyProto || "http").toLowerCase().trim()
         };
 
@@ -51,30 +72,22 @@ export class InstancesService {
         }
 
         try {
-          await axios.post(`${this.evoUrl}/proxy/set/${data.name}`, proxySetPayload, { 
-            headers: { 
-              'Content-Type': 'application/json',
-              apikey: this.evoKey 
-            } 
+          await axios.post(`${evoUrl}/proxy/set/${data.name}`, proxySetPayload, { 
+            headers: { 'Content-Type': 'application/json', apikey: evoKey } 
           });
           this.logger.log(`Proxy configurado com sucesso para a instância ${data.name}`);
         } catch (proxyErr: any) {
-          // Reverte a criação da instância na Evolution para não criar lixo no servidor
-          await axios.delete(`${this.evoUrl}/instance/delete/${data.name}`, { headers: { apikey: this.evoKey } }).catch(() => {});
-          
-          // Trata o erro chato do Zod que vem em forma de Array
+          await axios.delete(`${evoUrl}/instance/delete/${data.name}`, { headers: { apikey: evoKey } }).catch(() => {});
           let errorMsg = "Erro desconhecido de proxy";
           const resData = proxyErr?.response?.data;
           
           if (resData) {
              if (Array.isArray(resData.message)) {
-                // Junta todos os erros de validação Zod num só texto
                 errorMsg = resData.message.map((m: any) => m.message || JSON.stringify(m)).join(', ');
              } else {
                 errorMsg = resData.message || resData.error || proxyErr.message;
              }
           }
-
           throw new HttpException(`A Evolution rejeitou o Proxy: ${errorMsg}`, HttpStatus.BAD_REQUEST);
         }
       }
@@ -82,7 +95,7 @@ export class InstancesService {
       // 4. Configuração do Webhook
       if (this.webhookUrl) {
         await new Promise(resolve => setTimeout(resolve, 1500));
-        await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
+        await axios.post(`${evoUrl}/webhook/set/${data.name}`, {
           webhook: {
             enabled: true,
             url: this.webhookUrl,
@@ -96,10 +109,10 @@ export class InstancesService {
               "CONNECTION_UPDATE"
             ]
           }
-        }, { headers: { apikey: this.evoKey } }).catch(e => this.logger.warn(`Erro no webhook (ignorado): ${e.message}`));
+        }, { headers: { apikey: evoKey } }).catch(e => this.logger.warn(`Erro no webhook (ignorado): ${e.message}`));
       }
 
-      // 5. Salvar no Banco de Dados local apenas se tudo deu certo
+      // 5. Salvar no Banco de Dados
       return await this.prisma.instance.create({ 
         data: {
           name: data.name, 
@@ -133,34 +146,46 @@ export class InstancesService {
 
   async checkStatus(instanceName: string) {
     try {
-      const res = await axios.get(`${this.evoUrl}/instance/connectionState/${instanceName}`, { headers: { apikey: this.evoKey } });
+      const { evoUrl, evoKey } = await this.getEvolutionCredentials();
+      const res = await axios.get(`${evoUrl}/instance/connectionState/${instanceName}`, { headers: { apikey: evoKey } });
       const state = res.data?.instance?.state === 'open' ? 'connected' : 'disconnected';
       await this.prisma.instance.update({ where: { name: instanceName }, data: { status: state } });
       return { status: state };
-    } catch (e) { return { status: 'disconnected' }; }
+    } catch (e) { 
+      return { status: 'disconnected' }; 
+    }
   }
 
   async getQrCode(instanceName: string) {
     try {
-      const res = await axios.get(`${this.evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: this.evoKey } });
+      const { evoUrl, evoKey } = await this.getEvolutionCredentials();
+      const res = await axios.get(`${evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: evoKey } });
       return res.data;
     } catch (error: any) { 
-      const msg = error?.response?.data?.message || "Serviço Indisponível";
+      const msg = error?.response?.data?.message || "Serviço Indisponível ou Credenciais Inválidas";
       throw new HttpException(msg, HttpStatus.BAD_REQUEST); 
     }
   }
 
   async updateSettings(instanceName: string, data: any) {
     try {
-      await axios.post(`${this.evoUrl}/settings/set/${instanceName}`, {
+      const { evoUrl, evoKey } = await this.getEvolutionCredentials();
+      await axios.post(`${evoUrl}/settings/set/${instanceName}`, {
         rejectCall: data.rejectCalls, groupsIgnore: data.ignoreGroups
-      }, { headers: { apikey: this.evoKey } });
+      }, { headers: { apikey: evoKey } });
       return await this.prisma.instance.update({ where: { name: instanceName }, data: { rejectCalls: data.rejectCalls, ignoreGroups: data.ignoreGroups } });
-    } catch (e) { throw new HttpException('Erro ao atualizar settings', HttpStatus.BAD_REQUEST); }
+    } catch (e) { 
+      throw new HttpException('Erro ao atualizar settings', HttpStatus.BAD_REQUEST); 
+    }
   }
 
   async remove(instanceName: string) {
-    try { await axios.delete(`${this.evoUrl}/instance/delete/${instanceName}`, { headers: { apikey: this.evoKey } }); } catch (e) {}
+    try { 
+      const { evoUrl, evoKey } = await this.getEvolutionCredentials();
+      await axios.delete(`${evoUrl}/instance/delete/${instanceName}`, { headers: { apikey: evoKey } }); 
+    } catch (e) {
+      this.logger.warn(`Instância ${instanceName} não pôde ser apagada na Evolution (Pode já não existir).`);
+    }
     return this.prisma.instance.delete({ where: { name: instanceName } });
   }
 }
