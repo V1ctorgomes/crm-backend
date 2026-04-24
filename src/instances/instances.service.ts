@@ -30,9 +30,11 @@ export class InstancesService {
         integration: "WHATSAPP-BAILEYS"
       };
 
-      // CORREÇÃO: Formato exato do Proxy para Evolution V2 (Objeto embutido na criação)
+      // CORREÇÃO: Formato exato do Proxy para Evolution V2
+      // Adicionada a flag "enabled: true" que é estritamente necessária na v2
       if (data.proxyHost && data.proxyPort) {
         payload.proxy = {
+          enabled: true, // <- Flag necessária na v2
           host: data.proxyHost,
           port: parseInt(data.proxyPort, 10),
           protocol: data.proxyProto || "http"
@@ -47,6 +49,17 @@ export class InstancesService {
       // 2. Disparar pedido de criação para a Evolution
       await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
       this.logger.log(`Instância ${data.name} criada com sucesso na Evolution API v2.`);
+
+      // CORREÇÃO: Forçar a configuração do Proxy através do endpoint dedicado
+      // Isso evita bugs da Evolution de ignorar o proxy na inicialização primária
+      if (data.proxyHost && data.proxyPort) {
+        try {
+          await axios.post(`${this.evoUrl}/proxy/set/${data.name}`, payload.proxy, { headers: { apikey: this.evoKey } });
+          this.logger.log(`Proxy forçado via endpoint dedicado para a instância ${data.name}`);
+        } catch (proxyErr: any) {
+          this.logger.warn(`Aviso ao setar proxy via endpoint dedicado: ${proxyErr.message}`);
+        }
+      }
 
       // 3. Pequena espera e configuração do Webhook
       if (this.webhookUrl) {
