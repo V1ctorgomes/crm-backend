@@ -23,45 +23,51 @@ export class InstancesService {
     if (!this.evoUrl || !this.evoKey) throw new HttpException('Configuração Evolution ausente.', HttpStatus.BAD_REQUEST);
 
     try {
-      // 1. Criar a estrutura Base
-      const payload: any = {
-        instanceName: data.name,
-        qrcode: false, 
-        integration: "WHATSAPP-BAILEYS"
-      };
-
-      // CORREÇÃO: Formato exato do Proxy para Evolution V2
-      // Adicionada a flag "enabled: true" que é estritamente necessária na v2
+      // 1. Estruturar o objeto de proxy (Tratando tipos rigorosamente para passar na validação Zod da v2)
+      let proxyPayload: any = undefined;
       if (data.proxyHost && data.proxyPort) {
-        payload.proxy = {
-          enabled: true, // <- Flag necessária na v2
-          host: data.proxyHost,
-          port: parseInt(data.proxyPort, 10),
-          protocol: data.proxyProto || "http"
+        proxyPayload = {
+          enabled: true,
+          host: String(data.proxyHost).trim(),
+          port: Number(data.proxyPort), // Tem que ser Número obrigatoriamente
+          protocol: String(data.proxyProto || "http").toLowerCase().trim() // Tem que ser minúsculo
         };
         
         if (data.proxyUser && data.proxyPass) {
-          payload.proxy.username = data.proxyUser;
-          payload.proxy.password = data.proxyPass;
+          proxyPayload.username = String(data.proxyUser).trim();
+          proxyPayload.password = String(data.proxyPass).trim();
         }
       }
 
-      // 2. Disparar pedido de criação para a Evolution
+      // 2. Criar a estrutura Base
+      const payload: any = {
+        instanceName: data.name,
+        qrcode: false, 
+        integration: "WHATSAPP-BAILEYS",
+        ...(proxyPayload && { proxy: proxyPayload }) // Tenta injetar logo na criação
+      };
+
+      // 3. Disparar pedido de criação para a Evolution
       await axios.post(`${this.evoUrl}/instance/create`, payload, { headers: { apikey: this.evoKey } });
       this.logger.log(`Instância ${data.name} criada com sucesso na Evolution API v2.`);
 
-      // CORREÇÃO: Forçar a configuração do Proxy através do endpoint dedicado
-      // Isso evita bugs da Evolution de ignorar o proxy na inicialização primária
-      if (data.proxyHost && data.proxyPort) {
+      // 4. Forçar a configuração do Proxy através do endpoint dedicado
+      // Se a Evolution não conseguir conectar à internet usando esse proxy, ela vai devolver um erro (Test Proxy Error).
+      // O código agora pega esse erro, apaga a instância órfã e avisa você na tela do frontend.
+      if (proxyPayload) {
         try {
-          await axios.post(`${this.evoUrl}/proxy/set/${data.name}`, payload.proxy, { headers: { apikey: this.evoKey } });
-          this.logger.log(`Proxy forçado via endpoint dedicado para a instância ${data.name}`);
+          await axios.post(`${this.evoUrl}/proxy/set/${data.name}`, proxyPayload, { headers: { apikey: this.evoKey } });
+          this.logger.log(`Proxy configurado com sucesso para a instância ${data.name}`);
         } catch (proxyErr: any) {
-          this.logger.warn(`Aviso ao setar proxy via endpoint dedicado: ${proxyErr.message}`);
+          // Reverte a criação da instância na Evolution para não criar lixo no servidor
+          await axios.delete(`${this.evoUrl}/instance/delete/${data.name}`, { headers: { apikey: this.evoKey } }).catch(() => {});
+          
+          const errorMsg = proxyErr?.response?.data?.message || proxyErr?.response?.data?.error || proxyErr.message;
+          throw new HttpException(`Falha no Proxy (A Evolution rejeitou a conexão): ${errorMsg}`, HttpStatus.BAD_REQUEST);
         }
       }
 
-      // 3. Pequena espera e configuração do Webhook
+      // 5. Configuração do Webhook
       if (this.webhookUrl) {
         await new Promise(resolve => setTimeout(resolve, 1500));
         await axios.post(`${this.evoUrl}/webhook/set/${data.name}`, {
@@ -78,10 +84,10 @@ export class InstancesService {
               "CONNECTION_UPDATE"
             ]
           }
-        }, { headers: { apikey: this.evoKey } });
+        }, { headers: { apikey: this.evoKey } }).catch(e => this.logger.warn(`Erro no webhook (ignorado): ${e.message}`));
       }
 
-      // 4. Salvar no Banco de Dados local
+      // 6. Salvar no Banco de Dados local apenas se tudo deu certo
       return await this.prisma.instance.create({ 
         data: {
           name: data.name, 
@@ -89,7 +95,7 @@ export class InstancesService {
           rejectCalls: data.rejectCalls || false, 
           ignoreGroups: data.ignoreGroups || false,
           proxyHost: data.proxyHost || null, 
-          proxyPort: data.proxyPort || null, 
+          proxyPort: data.proxyPort ? String(data.proxyPort) : null, 
           proxyUser: data.proxyUser || null, 
           proxyPass: data.proxyPass || null, 
           proxyProto: data.proxyProto || 'http'
@@ -97,8 +103,9 @@ export class InstancesService {
       });
 
     } catch (error: any) {
+      if (error instanceof HttpException) throw error; // Se foi erro de Proxy, repassa para o frontend
       const msg = error?.response?.data?.message || error?.response?.data?.error || error.message;
-      this.logger.error(`Erro na criação: ${msg}`);
+      this.logger.error(`Erro na criação da Instância: ${msg}`);
       throw new HttpException(`Erro Evolution: ${msg}`, HttpStatus.BAD_REQUEST);
     }
   }
