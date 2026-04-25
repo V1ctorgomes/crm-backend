@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Delete, Sse, MessageEvent, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Sse, MessageEvent, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -40,7 +40,6 @@ export class WhatsappController {
     return this.whatsappService.sendText(body.number, body.text); 
   }
 
-  // 👉 ROTA RESTAURADA PARA ENVIO DE DOCUMENTOS/MÍDIA PARA A CLOUDFLARE E WHATSAPP
   @Post('send-media')
   @UseInterceptors(FileInterceptor('file'))
   async sendMedia(
@@ -48,5 +47,15 @@ export class WhatsappController {
     @Body() body: { number: string; caption: string }
   ) {
     return this.whatsappService.sendMedia(body.number, file, body.caption || '');
+  }
+
+  @Put('contacts/:number')
+  async updateContact(@Param('number') number: string, @Body() data: any) {
+    return this.whatsappService.updateContact(number, data);
+  }
+
+  @Delete('contacts/:number')
+  async removeContact(@Param('number') number: string) {
+    return this.whatsappService.removeContact(number);
   }
 }

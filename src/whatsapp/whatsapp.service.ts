@@ -257,7 +257,6 @@ export class WhatsappService {
 
   async getContacts() {
     try {
-      // CORREÇÃO: Removemos o filtro rígido de instância para listar TODOS os contactos salvos no banco.
       return await this.prisma.contact.findMany({ 
         orderBy: { lastMessageTime: 'desc' } 
       });
@@ -266,7 +265,6 @@ export class WhatsappService {
 
   async getChatHistory(number: string) {
     try {
-      // CORREÇÃO: Puxa o histórico de conversa do número, independente de qual instância foi usada no passado.
       return await this.prisma.message.findMany({ 
         where: { contactNumber: number }, 
         orderBy: { timestamp: 'asc' } 
@@ -295,5 +293,38 @@ export class WhatsappService {
       this.logger.error('Erro ao excluir conversa', e);
       throw new HttpException('Erro ao excluir', HttpStatus.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  async updateContact(number: string, data: any) {
+    return await this.prisma.contact.update({
+      where: { number },
+      data: {
+        name: data.name,
+        email: data.email,
+        cnpj: data.cnpj,
+      },
+    });
+  }
+
+  async removeContact(number: string) {
+    const contact = await this.prisma.contact.findUnique({
+      where: { number },
+      include: { tickets: true }
+    });
+
+    if (!contact) {
+      throw new HttpException('Contacto não encontrado.', HttpStatus.NOT_FOUND);
+    }
+
+    if (contact.tickets && contact.tickets.length > 0) {
+      throw new HttpException(
+        'Este contacto possui solicitações (OS) no Kanban e não pode ser excluído.', 
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    return await this.prisma.contact.delete({
+      where: { number },
+    });
   }
 }
