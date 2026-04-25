@@ -67,6 +67,7 @@ export class WhatsappService {
     let isMedia = false;
 
     const mediaObject = msg?.imageMessage || msg?.videoMessage || msg?.documentMessage || msg?.audioMessage || msg?.stickerMessage;
+    let fallbackSidebarText = "Mídia";
 
     if (mediaObject) {
       isMedia = true;
@@ -74,7 +75,9 @@ export class WhatsappService {
       const ext = mimeType.split('/')[1] || 'bin';
       fileName = mediaObject.fileName ? String(mediaObject.fileName) : `arquivo.${ext}`;
       
-      text = mediaObject.caption || text || (msg?.imageMessage ? "📷 Imagem" : msg?.documentMessage ? "📄 Documento" : msg?.audioMessage ? "🎵 Áudio" : "Mídia");
+      // Se não houver legenda, text fica vazio
+      text = mediaObject.caption || text || "";
+      fallbackSidebarText = msg?.imageMessage ? "Imagem" : msg?.documentMessage ? "Documento" : msg?.audioMessage ? "Áudio" : msg?.videoMessage ? "Vídeo" : "Mídia";
 
       if (!msgExists) {
         try {
@@ -90,7 +93,7 @@ export class WhatsappService {
           }
         } catch (error) {
           this.logger.error("Erro ao baixar mídia da Evolution", error);
-          text = "⚠️ [Falha ao salvar mídia na nuvem]";
+          text = "Falha ao salvar mídia na nuvem";
         }
       } else {
         mediaUrl = msgExists.mediaData || undefined;
@@ -108,10 +111,12 @@ export class WhatsappService {
           picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
         }
 
+        const finalSidebarText = text || fallbackSidebarText;
+
         await this.prisma.contact.upsert({
           where: { number: contactNumber },
           update: { 
-            lastMessage: text, 
+            lastMessage: finalSidebarText, 
             lastMessageTime: new Date(), 
             instanceName, 
             ...(picUrl && { profilePictureUrl: picUrl }) 
@@ -119,7 +124,7 @@ export class WhatsappService {
           create: { 
             number: contactNumber, 
             name: pushName, 
-            lastMessage: text, 
+            lastMessage: finalSidebarText, 
             instanceName, 
             profilePictureUrl: picUrl || null 
           }
@@ -132,7 +137,7 @@ export class WhatsappService {
                 id: waId, 
                 instanceName, 
                 contactNumber, 
-                text, 
+                text, // Se for mídia sem legenda, grava vazio
                 type: isFromMe ? 'sent' : 'received', 
                 timestamp: new Date(),
                 isMedia,           
@@ -207,9 +212,10 @@ export class WhatsappService {
     }
 
     let mediatype = 'document';
-    if (fileMimeType.startsWith('image')) mediatype = 'image';
-    else if (fileMimeType.startsWith('video')) mediatype = 'video';
-    else if (fileMimeType.startsWith('audio')) mediatype = 'audio';
+    let fallbackText = 'Documento';
+    if (fileMimeType.startsWith('image')) { mediatype = 'image'; fallbackText = 'Imagem'; }
+    else if (fileMimeType.startsWith('video')) { mediatype = 'video'; fallbackText = 'Vídeo'; }
+    else if (fileMimeType.startsWith('audio')) { mediatype = 'audio'; fallbackText = 'Áudio'; }
 
     try {
       const response = await axios.post(
@@ -229,8 +235,8 @@ export class WhatsappService {
 
       await this.prisma.contact.upsert({
         where: { number: cleanNumber },
-        update: { lastMessage: caption || '📷 Mídia', lastMessageTime: new Date(), instanceName },
-        create: { number: cleanNumber, name: cleanNumber, lastMessage: caption || '📷 Mídia', instanceName }
+        update: { lastMessage: caption || fallbackText, lastMessageTime: new Date(), instanceName },
+        create: { number: cleanNumber, name: cleanNumber, lastMessage: caption || fallbackText, instanceName }
       });
 
       const savedMessage = await this.prisma.message.create({
@@ -238,7 +244,7 @@ export class WhatsappService {
           id: String(waId), 
           instanceName, 
           contactNumber: cleanNumber, 
-          text: caption || '📷 Mídia', 
+          text: caption || '', // Sem emoji e sem legenda se for vazio
           type: 'sent',
           isMedia: true, 
           mediaData: mediaUrl, 
