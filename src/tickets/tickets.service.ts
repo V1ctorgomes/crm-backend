@@ -146,13 +146,19 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.$transaction(updates);
   }
 
-  async createTicket(data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, stageId: string }) {
+  async createTicket(data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, stageId: string }) {
     await this.prisma.contact.update({
       where: { number: data.contactNumber },
       data: { name: data.nome, email: data.email, cnpj: data.cpf }
     });
     return this.prisma.ticket.create({
-      data: { contactNumber: data.contactNumber, stageId: data.stageId, marca: data.marca, modelo: data.modelo },
+      data: { 
+        contactNumber: data.contactNumber, 
+        stageId: data.stageId, 
+        marca: data.marca, 
+        modelo: data.modelo,
+        customerType: data.customerType
+      },
       include: { contact: true, notes: true, files: true }
     });
   }

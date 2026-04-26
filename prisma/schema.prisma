@@ -95,6 +95,7 @@ model Ticket {
   stage         Stage    @relation(fields: [stageId], references: [id])
   marca         String?
   modelo        String?
+  customerType  String?
   isArchived    Boolean  @default(false)
   notes         Note[]
   files         TicketFile[] 
