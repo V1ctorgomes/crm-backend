@@ -164,8 +164,8 @@ export class WhatsappService {
     }
   }
 
-  async sendText(number: string, text: string) {
-    const instanceName = await this.getDefaultInstanceName();
+  async sendText(number: string, text: string, requestedInstanceName?: string) {
+    const instanceName = requestedInstanceName || await this.getDefaultInstanceName();
     try {
       const response = await axios.post(
         `${this.apiUrl}/message/sendText/${instanceName}`, 
@@ -191,8 +191,8 @@ export class WhatsappService {
     }
   }
 
-  async sendMedia(number: string, file: any, caption: string) {
-    const instanceName = await this.getDefaultInstanceName();
+  async sendMedia(number: string, file: any, caption: string, requestedInstanceName?: string) {
+    const instanceName = requestedInstanceName || await this.getDefaultInstanceName();
     const cleanNumber = String(number).replace(/\D/g, '');
 
     const fileBuffer = file.buffer;

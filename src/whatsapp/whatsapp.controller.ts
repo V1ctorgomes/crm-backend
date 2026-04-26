@@ -36,17 +36,17 @@ export class WhatsappController {
   }
 
   @Post('send')
-  async sendMessage(@Body() body: { number: string; text: string }) { 
-    return this.whatsappService.sendText(body.number, body.text); 
+  async sendMessage(@Body() body: { number: string; text: string; instanceName?: string }) { 
+    return this.whatsappService.sendText(body.number, body.text, body.instanceName); 
   }
 
   @Post('send-media')
   @UseInterceptors(FileInterceptor('file'))
   async sendMedia(
     @UploadedFile() file: any, 
-    @Body() body: { number: string; caption: string }
+    @Body() body: { number: string; caption: string; instanceName?: string }
   ) {
-    return this.whatsappService.sendMedia(body.number, file, body.caption || '');
+    return this.whatsappService.sendMedia(body.number, file, body.caption || '', body.instanceName);
   }
 
   @Put('contacts/:number')
