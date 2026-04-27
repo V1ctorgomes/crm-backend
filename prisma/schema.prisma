@@ -96,13 +96,14 @@ model Ticket {
   marca            String?
   modelo           String?
   customerType     String?
+  ticketType       String?      // NOVO CAMPO: Tipo de Solicitação
   isArchived       Boolean      @default(false)
   
   resolution       String?      
   resolutionReason String?      
 
   notes            Note[]
-  tasks            Task[]       // NOVA RELAÇÃO: Lembretes
+  tasks            Task[]       
   files            TicketFile[] 
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
@@ -116,7 +117,6 @@ model Note {
   createdAt DateTime @default(now())
 }
 
-// NOVO MODELO: TAREFAS / LEMBRETES
 model Task {
   id          String   @id @default(uuid())
   ticketId    String

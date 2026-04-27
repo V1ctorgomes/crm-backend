@@ -25,7 +25,7 @@ export class TicketsService implements OnModuleInit {
           include: { 
             contact: true, 
             notes: { orderBy: { createdAt: 'desc' } },
-            tasks: { orderBy: { dueDate: 'asc' } }, // INCLUI AS TAREFAS AQUI
+            tasks: { orderBy: { dueDate: 'asc' } }, 
             files: { orderBy: { createdAt: 'desc' } } 
           },
           orderBy: { createdAt: 'desc' }
@@ -144,7 +144,8 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.$transaction(updates);
   }
 
-  async createTicket(data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, stageId: string }) {
+  // ATUALIZADO AQUI COM TICKET TYPE
+  async createTicket(data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string }) {
     await this.prisma.contact.update({
       where: { number: data.contactNumber },
       data: { name: data.nome, email: data.email, cnpj: data.cpf }
@@ -155,7 +156,8 @@ export class TicketsService implements OnModuleInit {
         stageId: data.stageId, 
         marca: data.marca, 
         modelo: data.modelo,
-        customerType: data.customerType
+        customerType: data.customerType,
+        ticketType: data.ticketType
       },
       include: { contact: true, notes: true, files: true, tasks: true }
     });
@@ -187,7 +189,6 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.note.delete({ where: { id } });
   }
 
-  // ================= GESTÃO DE TAREFAS =================
   async addTask(ticketId: string, title: string, dueDate: string) {
     return this.prisma.task.create({
       data: {
