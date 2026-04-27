@@ -88,19 +88,24 @@ model Stage {
 }
 
 model Ticket {
-  id            String   @id @default(uuid())
-  contactNumber String
-  contact       Contact  @relation(fields: [contactNumber], references: [number])
-  stageId       String
-  stage         Stage    @relation(fields: [stageId], references: [id])
-  marca         String?
-  modelo        String?
-  customerType  String?
-  isArchived    Boolean  @default(false)
-  notes         Note[]
-  files         TicketFile[] 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               String       @id @default(uuid())
+  contactNumber    String
+  contact          Contact      @relation(fields: [contactNumber], references: [number])
+  stageId          String
+  stage            Stage        @relation(fields: [stageId], references: [id])
+  marca            String?
+  modelo           String?
+  customerType     String?
+  isArchived       Boolean      @default(false)
+  
+  // NOVOS CAMPOS DE RESOLUÇÃO (ENCERRAMENTO)
+  resolution       String?      
+  resolutionReason String?      
+
+  notes            Note[]
+  files            TicketFile[] 
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 }
 
 model Note {
@@ -122,8 +127,6 @@ model TicketFile {
   description String?  @db.Text
   createdAt   DateTime @default(now())
 }
-
-// ================= NOVOS MODELOS: PROVEDORES E PROXIES =================
 
 model Provider {
   id        String   @id @default(uuid())

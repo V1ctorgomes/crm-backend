@@ -48,7 +48,6 @@ export class TicketsController {
     return this.ticketsService.createTicket(body);
   }
 
-  // NOVO: Endpoint para excluir a OS por completo
   @Delete(':id')
   deleteTicket(@Param('id') id: string) {
     return this.ticketsService.deleteTicket(id);
@@ -71,8 +70,13 @@ export class TicketsController {
   }
 
   @Put(':id/archive')
-  toggleArchiveTicket(@Param('id') id: string, @Body('isArchived') isArchived: boolean) {
-    return this.ticketsService.toggleArchiveTicket(id, isArchived);
+  toggleArchiveTicket(
+    @Param('id') id: string, 
+    @Body('isArchived') isArchived: boolean,
+    @Body('resolution') resolution?: string,
+    @Body('resolutionReason') resolutionReason?: string,
+  ) {
+    return this.ticketsService.toggleArchiveTicket(id, isArchived, resolution, resolutionReason);
   }
 
   @Post(':id/notes')
