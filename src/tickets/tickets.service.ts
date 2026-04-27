@@ -25,6 +25,7 @@ export class TicketsService implements OnModuleInit {
           include: { 
             contact: true, 
             notes: { orderBy: { createdAt: 'desc' } },
+            tasks: { orderBy: { dueDate: 'asc' } }, // INCLUI AS TAREFAS AQUI
             files: { orderBy: { createdAt: 'desc' } } 
           },
           orderBy: { createdAt: 'desc' }
@@ -94,6 +95,7 @@ export class TicketsService implements OnModuleInit {
         contact: true, 
         stage: true, 
         notes: { orderBy: { createdAt: 'desc' } },
+        tasks: { orderBy: { dueDate: 'asc' } },
         files: { orderBy: { createdAt: 'desc' } } 
       },
       orderBy: { createdAt: 'desc' } 
@@ -111,6 +113,7 @@ export class TicketsService implements OnModuleInit {
         contact: true, 
         stage: true, 
         notes: { orderBy: { createdAt: 'desc' } },
+        tasks: { orderBy: { dueDate: 'asc' } },
         files: { orderBy: { createdAt: 'desc' } } 
       },
       orderBy: { updatedAt: 'desc' }
@@ -154,7 +157,7 @@ export class TicketsService implements OnModuleInit {
         modelo: data.modelo,
         customerType: data.customerType
       },
-      include: { contact: true, notes: true, files: true }
+      include: { contact: true, notes: true, files: true, tasks: true }
     });
   }
 
@@ -162,7 +165,6 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.ticket.update({ where: { id: ticketId }, data: { stageId } });
   }
 
-  // ATUALIZADO: Recebe e grava a resolução (motivo)
   async toggleArchiveTicket(ticketId: string, isArchived: boolean, resolution?: string, resolutionReason?: string) {
     const dataToUpdate: any = { isArchived };
 
@@ -183,5 +185,24 @@ export class TicketsService implements OnModuleInit {
 
   async deleteNote(id: string) {
     return this.prisma.note.delete({ where: { id } });
+  }
+
+  // ================= GESTÃO DE TAREFAS =================
+  async addTask(ticketId: string, title: string, dueDate: string) {
+    return this.prisma.task.create({
+      data: {
+        ticketId,
+        title,
+        dueDate: new Date(dueDate)
+      }
+    });
+  }
+
+  async toggleTask(id: string, isCompleted: boolean) {
+    return this.prisma.task.update({ where: { id }, data: { isCompleted } });
+  }
+
+  async deleteTask(id: string) {
+    return this.prisma.task.delete({ where: { id } });
   }
 }

@@ -88,4 +88,20 @@ export class TicketsController {
   deleteNote(@Param('id') id: string) {
     return this.ticketsService.deleteNote(id);
   }
+
+  // ================= ROTAS DE TAREFAS / FOLLOW-UPS =================
+  @Post(':id/tasks')
+  addTask(@Param('id') id: string, @Body() body: { title: string, dueDate: string }) {
+    return this.ticketsService.addTask(id, body.title, body.dueDate);
+  }
+
+  @Put('tasks/:taskId')
+  toggleTask(@Param('taskId') taskId: string, @Body('isCompleted') isCompleted: boolean) {
+    return this.ticketsService.toggleTask(taskId, isCompleted);
+  }
+
+  @Delete('tasks/:taskId')
+  deleteTask(@Param('taskId') taskId: string) {
+    return this.ticketsService.deleteTask(taskId);
+  }
 }

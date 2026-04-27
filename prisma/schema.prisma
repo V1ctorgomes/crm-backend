@@ -98,11 +98,11 @@ model Ticket {
   customerType     String?
   isArchived       Boolean      @default(false)
   
-  // NOVOS CAMPOS DE RESOLUÇÃO (ENCERRAMENTO)
   resolution       String?      
   resolutionReason String?      
 
   notes            Note[]
+  tasks            Task[]       // NOVA RELAÇÃO: Lembretes
   files            TicketFile[] 
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
@@ -114,6 +114,18 @@ model Note {
   ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   text      String   @db.Text
   createdAt DateTime @default(now())
+}
+
+// NOVO MODELO: TAREFAS / LEMBRETES
+model Task {
+  id          String   @id @default(uuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  title       String
+  dueDate     DateTime
+  isCompleted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model TicketFile {
