@@ -13,15 +13,8 @@ model User {
   name              String
   password          String   
   profilePictureUrl String?    
-  role              String     @default("USER") // USER, ADMIN, DEVELOPER
-
+  role              String     @default("USER")
   instances         Instance[]
-  customers         Customer[]
-  contacts          Contact[]
-  messages          Message[]
-  stages            Stage[]
-  tickets           Ticket[]
-
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
@@ -30,8 +23,6 @@ model User {
 
 model Instance {
   id           String   @id @default(uuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name         String   @unique
   status       String   @default("disconnected")
   rejectCalls  Boolean  @default(false)
@@ -41,14 +32,14 @@ model Instance {
   proxyUser    String?
   proxyPass    String?
   proxyProto   String?  @default("http")
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
 
 model Customer {
   id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   email     String   @unique
   phone     String?
@@ -58,10 +49,7 @@ model Customer {
 }
 
 model Contact {
-  id                String    @id @default(uuid())
-  userId            String
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  number            String
+  number            String    @id
   instanceName      String?
   name              String?
   profilePictureUrl String?
@@ -72,18 +60,13 @@ model Contact {
   messages          Message[]
   tickets           Ticket[]
   updatedAt         DateTime  @updatedAt
-
-  // Permite que usuários diferentes salvem o mesmo número
-  @@unique([number, userId])
 }
 
 model Message {
   id            String   @id @default(uuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contactId     String
-  contact       Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   instanceName  String?
+  contactNumber String
+  contact       Contact  @relation(fields: [contactNumber], references: [number])
   text          String   @db.Text
   type          String   
   isMedia       Boolean  @default(false)
@@ -95,8 +78,6 @@ model Message {
 
 model Stage {
   id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   color     String   @default("#e2e8f0")
   order     Int      @default(0)
@@ -108,19 +89,19 @@ model Stage {
 
 model Ticket {
   id               String       @id @default(uuid())
-  userId           String
-  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contactId        String
-  contact          Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactNumber    String
+  contact          Contact      @relation(fields: [contactNumber], references: [number])
   stageId          String
   stage            Stage        @relation(fields: [stageId], references: [id])
   marca            String?
   modelo           String?
   customerType     String?
-  ticketType       String?      
+  ticketType       String?      // NOVO CAMPO: Tipo de Solicitação
   isArchived       Boolean      @default(false)
-  resolution       String?
+  
+  resolution       String?      
   resolutionReason String?      
+
   notes            Note[]
   tasks            Task[]       
   files            TicketFile[] 
@@ -159,8 +140,6 @@ model TicketFile {
   createdAt   DateTime @default(now())
 }
 
-// Provedores e Proxies podem ser globais (sem userId) se partilhados por toda a plataforma,
-// ou podem ter userId se cada cliente trouxer o seu proxy. Mantivemos globais.
 model Provider {
   id        String   @id @default(uuid())
   name      String   @unique

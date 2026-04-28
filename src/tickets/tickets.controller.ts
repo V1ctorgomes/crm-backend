@@ -1,34 +1,107 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Req, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TicketsService } from './tickets.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@UseGuards(JwtAuthGuard)
 @Controller('tickets')
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
   @Get('board')
-  getBoard(@Req() req) { return this.ticketsService.getBoard(req.user.id); }
+  getBoard() { return this.ticketsService.getBoard(); }
 
   @Get('folders')
-  getFolders(@Req() req) { return this.ticketsService.getFolders(req.user.id); }
+  getFolders() { return this.ticketsService.getFolders(); }
+
+  @Get('contact/:number')
+  getTicketByContact(@Param('number') number: string) {
+    return this.ticketsService.getTicketByContact(number);
+  }
 
   @Get('stages')
-  getAllStages(@Req() req) { return this.ticketsService.getAllStages(req.user.id); }
+  getAllStages() { return this.ticketsService.getAllStages(); }
 
   @Get('archived')
-  getArchivedTickets(@Req() req) { return this.ticketsService.getArchivedTickets(req.user.id); }
+  getArchivedTickets() { return this.ticketsService.getArchivedTickets(); }
 
   @Post('stages')
-  createStage(@Req() req, @Body() body: { name: string; color: string }) {
-    return this.ticketsService.createStage(req.user.id, body.name, body.color);
+  createStage(@Body() body: { name: string; color: string }) {
+    return this.ticketsService.createStage(body.name, body.color);
+  }
+
+  @Put('stages/reorder')
+  reorderStages(@Body('stages') stages: { id: string; order: number }[]) {
+    return this.ticketsService.reorderStages(stages);
+  }
+
+  @Put('stages/:id')
+  updateStage(@Param('id') id: string, @Body() data: any) {
+    return this.ticketsService.updateStage(id, data);
+  }
+
+  @Delete('stages/:id')
+  deleteStage(@Param('id') id: string) {
+    return this.ticketsService.deleteStage(id);
   }
 
   @Post()
-  createTicket(@Req() req, @Body() body: any) {
-    return this.ticketsService.createTicket(req.user.id, body);
+  createTicket(@Body() body: any) {
+    return this.ticketsService.createTicket(body);
   }
 
-  // Restantes rotas recebem req.user.id nos Services correspondentes...
+  @Delete(':id')
+  deleteTicket(@Param('id') id: string) {
+    return this.ticketsService.deleteTicket(id);
+  }
+
+  @Post(':id/files')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadTicketFile(@Param('id') id: string, @UploadedFile() file: any, @Body('description') description?: string) {
+    return this.ticketsService.uploadTicketFile(id, file, description);
+  }
+
+  @Delete('files/:fileId')
+  deleteTicketFile(@Param('fileId') fileId: string) {
+    return this.ticketsService.deleteTicketFile(fileId);
+  }
+
+  @Put(':id/stage')
+  updateTicketStage(@Param('id') id: string, @Body('stageId') stageId: string) {
+    return this.ticketsService.updateTicketStage(id, stageId);
+  }
+
+  @Put(':id/archive')
+  toggleArchiveTicket(
+    @Param('id') id: string, 
+    @Body('isArchived') isArchived: boolean,
+    @Body('resolution') resolution?: string,
+    @Body('resolutionReason') resolutionReason?: string,
+  ) {
+    return this.ticketsService.toggleArchiveTicket(id, isArchived, resolution, resolutionReason);
+  }
+
+  @Post(':id/notes')
+  addNote(@Param('id') id: string, @Body('text') text: string) {
+    return this.ticketsService.addNote(id, text);
+  }
+
+  @Delete('notes/:id')
+  deleteNote(@Param('id') id: string) {
+    return this.ticketsService.deleteNote(id);
+  }
+
+  // ================= ROTAS DE TAREFAS / FOLLOW-UPS =================
+  @Post(':id/tasks')
+  addTask(@Param('id') id: string, @Body() body: { title: string, dueDate: string }) {
+    return this.ticketsService.addTask(id, body.title, body.dueDate);
+  }
+
+  @Put('tasks/:taskId')
+  toggleTask(@Param('taskId') taskId: string, @Body('isCompleted') isCompleted: boolean) {
+    return this.ticketsService.toggleTask(taskId, isCompleted);
+  }
+
+  @Delete('tasks/:taskId')
+  deleteTask(@Param('taskId') taskId: string) {
+    return this.ticketsService.deleteTask(taskId);
+  }
 }
