@@ -17,7 +17,7 @@ async function main() {
     },
   });
 
-  console.log('✅ Seed executado com sucesso a partir de src/prisma!');
+  console.log('✅ Seed executado com sucesso a partir de src/prisma!..');
 }
 
 main()
