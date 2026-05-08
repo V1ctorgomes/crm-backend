@@ -1,10 +1,8 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { Customer } from '@prisma/client';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('customers')
-@UseGuards(JwtAuthGuard)
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
