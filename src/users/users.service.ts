@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -15,7 +16,14 @@ export class UsersService {
   }
 
   async create(data: any) {
-    return this.prisma.user.create({ data });
+    // Hash da senha antes de salvar no banco
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+    return this.prisma.user.create({ 
+      data: {
+        ...data,
+        password: hashedPassword
+      }
+    });
   }
 
   // Lógica principal de atualização do Perfil com foto
@@ -25,7 +33,8 @@ export class UsersService {
     if (data.name) updateData.name = data.name;
     if (data.email) updateData.email = data.email;
     if (data.password && data.password.trim() !== '') {
-      updateData.password = data.password;
+      // Hash da senha também na atualização
+      updateData.password = await bcrypt.hash(data.password, 10);
     }
 
     if (file) {
