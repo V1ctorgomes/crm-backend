@@ -36,4 +36,15 @@ export class AuthService {
       role: user.role,
     };
   }
+
+  /** Dados mínimos para o ecrã de login (sem autenticação). */
+  async findRecentMembersForLogin(limit = 3) {
+    const take = Math.min(Math.max(Number(limit) || 3, 1), 10);
+    const users = await this.prisma.user.findMany({
+      take,
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, profilePictureUrl: true },
+    });
+    return { users };
+  }
 }
