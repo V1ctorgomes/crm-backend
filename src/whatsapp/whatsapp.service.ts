@@ -113,7 +113,8 @@ export class WhatsappService {
           if (response.data && response.data.base64) {
             const buffer = Buffer.from(String(response.data.base64), 'base64');
             const stableKey = scopedWaId || (waId ? `${userId}_${contactNumber}_${waId}` : undefined);
-            mediaUrl = await this.r2Service.uploadBuffer(buffer, fileName, mimeType, contactNumber, stableKey);
+            const mediaFolder = this.r2Service.conversasPath(userId, contactNumber);
+            mediaUrl = await this.r2Service.uploadBuffer(buffer, fileName, mimeType, mediaFolder, stableKey);
           }
         } catch (error) {
           this.logger.error("Erro ao baixar mídia da Evolution", error);
@@ -259,11 +260,12 @@ export class WhatsappService {
     const stableObjectId = `${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     let mediaUrl = '';
     try {
+      const mediaFolder = this.r2Service.conversasPath(userId, cleanNumber);
       mediaUrl = await this.r2Service.uploadBuffer(
         fileBuffer,
         fileOriginalName,
         fileMimeType,
-        cleanNumber,
+        mediaFolder,
         stableObjectId,
       );
     } catch (error) {
@@ -361,7 +363,8 @@ export class WhatsappService {
 
   async deleteConversation(userId: string, number: string) {
     try {
-      await this.r2Service.deleteFolder(number);
+      const conversasPrefix = this.r2Service.conversasPath(userId, number);
+      await this.r2Service.deleteFolder(conversasPrefix);
 
       await this.prisma.message.deleteMany({ 
         where: { userId, contactNumber: number } 

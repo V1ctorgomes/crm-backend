@@ -46,17 +46,43 @@ export class R2Service {
    * @param stableObjectId — se definido, a chave no bucket é determinística (sobrescreve o mesmo objeto).
    *   Evita ficheiros duplicados no R2 quando o webhook da Evolution é entregue mais do que uma vez em corrida.
    */
+  /**
+   * Caminho no balde por utilizador (UUID) e subáreas.
+   * Ex.: `{userId}/conversas/5511999999999`, `{userId}/solicitacoes/{ticketId}`, `{userId}/perfil`
+   */
+  conversasPath(userId: string, contactNumber: string): string {
+    const uid = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const num = String(contactNumber).replace(/\D/g, '');
+    return `${uid}/conversas/${num}`;
+  }
+
+  solicitacoesTicketPath(userId: string, ticketId: string): string {
+    const uid = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const tid = String(ticketId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `${uid}/solicitacoes/${tid}`;
+  }
+
+  perfilPath(userId: string): string {
+    const uid = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `${uid}/perfil`;
+  }
+
   async uploadBuffer(
     buffer: Buffer,
     originalName: string,
     mimeType: string,
-    folderName: string,
+    /** Caminho relativo sob o balde (ex.: `uuid/conversas/5511`), sem barra inicial */
+    folderPath: string,
     stableObjectId?: string,
   ): Promise<string> {
     try {
       const fileExtension = originalName.split('.').pop() || 'bin';
       const cleanName = originalName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
-      const cleanFolder = folderName.replace(/\D/g, '');
+      // Mesma regra que uploadFile: permite UUID, barras e hífens (não só dígitos).
+      const cleanFolder = String(folderPath)
+        .replace(/[^a-zA-Z0-9_/-]/g, '')
+        .replace(/\/+/g, '/')
+        .replace(/^\/+|\/+$/g, '');
       const safeStable = stableObjectId
         ? String(stableObjectId).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 220)
         : '';

@@ -94,7 +94,7 @@ export class UsersService {
     }
 
     if (file) {
-      updateData.profilePictureUrl = await this.r2Service.uploadFile(file, `profiles/${id}`);
+      updateData.profilePictureUrl = await this.r2Service.uploadFile(file, this.r2Service.perfilPath(id));
     }
 
     return this.prisma.user.update({

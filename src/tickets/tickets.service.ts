@@ -90,7 +90,8 @@ export class TicketsService implements OnModuleInit {
     if (!file) throw new HttpException('Arquivo ausente', HttpStatus.BAD_REQUEST);
     await this.ensureTicketOwner(userId, ticketId);
     
-    const fileUrl = await this.r2Service.uploadFile(file, `tickets/${ticketId}`);
+    const folder = this.r2Service.solicitacoesTicketPath(userId, ticketId);
+    const fileUrl = await this.r2Service.uploadFile(file, folder);
     const safeName = Buffer.from(file.originalname, 'latin1').toString('utf8');
 
     return this.prisma.ticketFile.create({
@@ -118,7 +119,7 @@ export class TicketsService implements OnModuleInit {
 
   async deleteTicket(userId: string, id: string) {
     await this.ensureTicketOwner(userId, id);
-    await this.r2Service.deleteFolder(`tickets/${id}`);
+    await this.r2Service.deleteFolder(this.r2Service.solicitacoesTicketPath(userId, id));
     return this.prisma.ticket.delete({ where: { id } });
   }
 
