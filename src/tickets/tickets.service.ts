@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
+import { sanitizeAndAssertCreateTicket } from './ticket-create.validation';
 
 @Injectable()
 export class TicketsService implements OnModuleInit {
@@ -191,29 +192,30 @@ export class TicketsService implements OnModuleInit {
   }
 
   async createTicket(userId: string, data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string }) {
-    await this.ensureStageOwner(userId, data.stageId);
+    const d = sanitizeAndAssertCreateTicket(data);
+    await this.ensureStageOwner(userId, d.stageId);
     await this.prisma.contact.upsert({
-      where: { number_userId: { number: data.contactNumber, userId } },
-      update: { name: data.nome, email: data.email, cnpj: data.cpf },
+      where: { number_userId: { number: d.contactNumber, userId } },
+      update: { name: d.nome, email: d.email, cnpj: d.cpf },
       create: {
-        number: data.contactNumber,
+        number: d.contactNumber,
         userId,
-        name: data.nome,
-        email: data.email,
-        cnpj: data.cpf,
+        name: d.nome,
+        email: d.email,
+        cnpj: d.cpf,
       },
     });
     return this.prisma.ticket.create({
-      data: { 
+      data: {
         userId,
-        contactNumber: data.contactNumber, 
-        stageId: data.stageId, 
-        marca: data.marca, 
-        modelo: data.modelo,
-        customerType: data.customerType,
-        ticketType: data.ticketType
+        contactNumber: d.contactNumber,
+        stageId: d.stageId,
+        marca: d.marca,
+        modelo: d.modelo,
+        customerType: d.customerType,
+        ticketType: d.ticketType,
       },
-      include: { contact: true, notes: true, files: true, tasks: true }
+      include: { contact: true, notes: true, files: true, tasks: true },
     });
   }
 
