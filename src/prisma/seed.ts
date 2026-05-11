@@ -29,6 +29,20 @@ async function main() {
     },
   });
 
+  const catalogDefaults: { category: string; label: string; sortOrder: number }[] = [
+    { category: 'MARCA', label: 'Outras', sortOrder: 1 },
+    { category: 'MODELO', label: 'Não especificado', sortOrder: 1 },
+    { category: 'CUSTOMER_TYPE', label: 'Particular', sortOrder: 1 },
+    { category: 'TICKET_TYPE', label: 'Orçamento', sortOrder: 1 },
+  ];
+  for (const row of catalogDefaults) {
+    await prisma.ticketCatalogItem.upsert({
+      where: { category_label: { category: row.category, label: row.label } },
+      update: { isActive: true, sortOrder: row.sortOrder },
+      create: { category: row.category, label: row.label, sortOrder: row.sortOrder },
+    });
+  }
+
   console.log('✅ Seed executado com sucesso a partir de src/prisma!..');
 }
 

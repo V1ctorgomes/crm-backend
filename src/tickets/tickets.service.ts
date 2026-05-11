@@ -2,10 +2,15 @@ import { Injectable, OnModuleInit, HttpException, HttpStatus } from '@nestjs/com
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
 import { sanitizeAndAssertCreateTicket } from './ticket-create.validation';
+import { TicketCatalogService } from '../ticket-catalog/ticket-catalog.service';
 
 @Injectable()
 export class TicketsService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private r2Service: R2Service) {}
+  constructor(
+    private prisma: PrismaService,
+    private r2Service: R2Service,
+    private ticketCatalog: TicketCatalogService,
+  ) {}
 
   async onModuleInit() {
     // Stages padrão agora são por usuário e são criadas sob demanda.
@@ -193,6 +198,12 @@ export class TicketsService implements OnModuleInit {
 
   async createTicket(userId: string, data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string }) {
     const d = sanitizeAndAssertCreateTicket(data);
+    await this.ticketCatalog.assertActiveLabels({
+      marca: d.marca,
+      modelo: d.modelo,
+      customerType: d.customerType,
+      ticketType: d.ticketType,
+    });
     await this.ensureStageOwner(userId, d.stageId);
     await this.prisma.contact.upsert({
       where: { number_userId: { number: d.contactNumber, userId } },

@@ -184,3 +184,18 @@ model Proxy {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+/// Opções globais para OS (marca, modelo, tipo de cliente, tipo de solicitação). Apenas DEVELOPER gere.
+model TicketCatalogItem {
+  id        String   @id @default(uuid())
+  category  String
+  label     String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([category, label])
+  @@index([category, isActive])
+  @@map("ticket_catalog_items")
+}
