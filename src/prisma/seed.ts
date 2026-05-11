@@ -18,11 +18,11 @@ async function main() {
   });
 
   await prisma.user.upsert({
-    where: { email: 'admin@crm.com' },
+    where: { email: 'admindois@crm.com' },
     update: {},
     create: {
-      email: 'admin@crm.com',
-      name: 'Admin',
+      email: 'admindois@crm.com',
+      name: 'Admin Dois',
       password: password,
     },
   });
