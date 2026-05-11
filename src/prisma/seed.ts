@@ -17,6 +17,16 @@ async function main() {
     },
   });
 
+  await prisma.user.upsert({
+    where: { email: 'admin@crm.com' },
+    update: {},
+    create: {
+      email: 'admin@crm.com',
+      name: 'Admin',
+      password: password,
+    },
+  });
+
   console.log('✅ Seed executado com sucesso a partir de src/prisma!..');
 }
 
