@@ -42,12 +42,27 @@ export class R2Service {
     }
   }
 
-  async uploadBuffer(buffer: Buffer, originalName: string, mimeType: string, folderName: string): Promise<string> {
+  /**
+   * @param stableObjectId — se definido, a chave no bucket é determinística (sobrescreve o mesmo objeto).
+   *   Evita ficheiros duplicados no R2 quando o webhook da Evolution é entregue mais do que uma vez em corrida.
+   */
+  async uploadBuffer(
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+    folderName: string,
+    stableObjectId?: string,
+  ): Promise<string> {
     try {
       const fileExtension = originalName.split('.').pop() || 'bin';
       const cleanName = originalName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
       const cleanFolder = folderName.replace(/\D/g, '');
-      const uniqueKey = `${cleanFolder}/${randomUUID()}-recebido-${cleanName}.${fileExtension}`;
+      const safeStable = stableObjectId
+        ? String(stableObjectId).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 220)
+        : '';
+      const uniqueKey = safeStable
+        ? `${cleanFolder}/${safeStable}.${fileExtension}`
+        : `${cleanFolder}/${randomUUID()}-recebido-${cleanName}.${fileExtension}`;
 
       const command = new PutObjectCommand({
         Bucket: process.env.R2_BUCKET_NAME!,

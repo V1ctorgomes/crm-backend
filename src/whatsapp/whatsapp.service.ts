@@ -104,7 +104,8 @@ export class WhatsappService {
 
           if (response.data && response.data.base64) {
             const buffer = Buffer.from(String(response.data.base64), 'base64');
-            mediaUrl = await this.r2Service.uploadBuffer(buffer, fileName, mimeType, contactNumber);
+            const stableKey = scopedWaId || (waId ? `${userId}_${contactNumber}_${waId}` : undefined);
+            mediaUrl = await this.r2Service.uploadBuffer(buffer, fileName, mimeType, contactNumber, stableKey);
           }
         } catch (error) {
           this.logger.error("Erro ao baixar mídia da Evolution", error);
@@ -150,21 +151,29 @@ export class WhatsappService {
 
         if (scopedWaId) {
           if (!msgExists) {
-            await this.prisma.message.create({
-              data: { 
-                id: scopedWaId,
-                userId,
-                instanceName, 
-                contactNumber, 
-                text, // Se for mídia sem legenda, grava vazio
-                type: isFromMe ? 'sent' : 'received', 
-                timestamp: new Date(),
-                isMedia,           
-                mediaData: mediaUrl || null, 
-                mimeType: mimeType || null,          
-                fileName: fileName || null           
+            try {
+              await this.prisma.message.create({
+                data: {
+                  id: scopedWaId,
+                  userId,
+                  instanceName,
+                  contactNumber,
+                  text,
+                  type: isFromMe ? 'sent' : 'received',
+                  timestamp: new Date(),
+                  isMedia,
+                  mediaData: mediaUrl || null,
+                  mimeType: mimeType || null,
+                  fileName: fileName || null,
+                },
+              });
+            } catch (e: any) {
+              if (e?.code === 'P2002') {
+                this.logger.warn(`Mensagem duplicada ignorada (idempotência): ${scopedWaId}`);
+              } else {
+                throw e;
               }
-            });
+            }
           }
         }
         
@@ -202,17 +211,21 @@ export class WhatsappService {
       });
 
       if (waId) {
-        await this.prisma.message.create({ 
-          data: {
-            id: this.buildScopedMessageId(userId, String(waId)),
-            userId,
-            instanceName,
-            contactNumber: number,
-            text,
-            type: 'sent',
-            timestamp: new Date(),
-          },
-        });
+        try {
+          await this.prisma.message.create({
+            data: {
+              id: this.buildScopedMessageId(userId, String(waId)),
+              userId,
+              instanceName,
+              contactNumber: number,
+              text,
+              type: 'sent',
+              timestamp: new Date(),
+            },
+          });
+        } catch (e: any) {
+          if (e?.code !== 'P2002') throw e;
+        }
       }
       return { success: true, data: response.data };
     } catch (e) { 
@@ -270,23 +283,41 @@ export class WhatsappService {
         create: { number: cleanNumber, userId, name: cleanNumber, lastMessage: caption || fallbackText, instanceName }
       });
 
-      const savedMessage = await this.prisma.message.create({
-        data: {
-          id: this.buildScopedMessageId(userId, String(waId)),
-          userId,
-          instanceName, 
-          contactNumber: cleanNumber, 
-          text: caption || '', // Sem emoji e sem legenda se for vazio
-          type: 'sent',
-          isMedia: true, 
-          mediaData: mediaUrl, 
-          mimeType: fileMimeType, 
-          fileName: fileOriginalName, 
-          timestamp: new Date()
+      const scopedId = this.buildScopedMessageId(userId, String(waId));
+      let savedMessage;
+      try {
+        savedMessage = await this.prisma.message.create({
+          data: {
+            id: scopedId,
+            userId,
+            instanceName,
+            contactNumber: cleanNumber,
+            text: caption || '',
+            type: 'sent',
+            isMedia: true,
+            mediaData: mediaUrl,
+            mimeType: fileMimeType,
+            fileName: fileOriginalName,
+            timestamp: new Date(),
+          },
+        });
+      } catch (e: any) {
+        if (e?.code === 'P2002') {
+          savedMessage =
+            (await this.prisma.message.findUnique({ where: { id: scopedId } })) ||
+            ({
+              id: scopedId,
+              mediaData: mediaUrl,
+              mimeType: fileMimeType,
+              fileName: fileOriginalName,
+            } as any);
+          this.logger.warn(`create mídia duplicada ignorada: ${scopedId}`);
+        } else {
+          throw e;
         }
-      });
+      }
 
-      return { success: true, id: waId, mediaData: mediaUrl, ...savedMessage };
+      return { success: true, id: waId, mediaData: mediaUrl, ...(savedMessage || {}) };
     } catch (error: any) {
       this.logger.error("Erro API ao enviar mídia", error?.response?.data || error.message);
       throw new HttpException('Falha ao enviar arquivo', HttpStatus.BAD_REQUEST);
