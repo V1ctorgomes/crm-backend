@@ -2,9 +2,12 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, Req, UseGuards } fro
 import { CustomersService } from './customers.service';
 import { Customer } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('customers')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN', 'USER')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 

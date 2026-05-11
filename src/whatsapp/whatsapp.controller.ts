@@ -4,6 +4,8 @@ import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('whatsapp')
 export class WhatsappController {
@@ -24,31 +26,36 @@ export class WhatsappController {
   }
 
   @Get('contacts')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
   async getContacts(@Req() req: any) { 
     return this.whatsappService.getContacts(req.user.userId); 
   }
 
   @Get('history/:number')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
   async getChatHistory(@Req() req: any, @Param('number') number: string) { 
     return this.whatsappService.getChatHistory(req.user.userId, number); 
   }
 
   @Delete('history/:number')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
   async deleteConversation(@Req() req: any, @Param('number') number: string) { 
     return this.whatsappService.deleteConversation(req.user.userId, number); 
   }
 
   @Post('send')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
   async sendMessage(@Req() req: any, @Body() body: { number: string; text: string; instanceName?: string }) { 
     return this.whatsappService.sendText(req.user.userId, body.number, body.text, body.instanceName); 
   }
 
   @Post('send-media')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
   @UseInterceptors(FileInterceptor('file'))
   async sendMedia(
     @Req() req: any,
@@ -59,13 +66,15 @@ export class WhatsappController {
   }
 
   @Put('contacts/:number')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
   async updateContact(@Req() req: any, @Param('number') number: string, @Body() data: any) {
     return this.whatsappService.updateContact(req.user.userId, number, data);
   }
 
   @Delete('contacts/:number')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
   async removeContact(@Req() req: any, @Param('number') number: string) {
     return this.whatsappService.removeContact(req.user.userId, number);
   }

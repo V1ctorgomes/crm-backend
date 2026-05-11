@@ -10,7 +10,7 @@ export class AuthService {
     private jwtService: JwtService
   ) {}
 
-  async signIn(email: string, pass: string): Promise<{ access_token: string; name: string }> {
+  async signIn(email: string, pass: string): Promise<{ access_token: string; name: string; role: string }> {
     // 1. Procura o utilizador pelo email
     const user = await this.prisma.user.findUnique({
       where: { email },
@@ -33,6 +33,7 @@ export class AuthService {
     return {
       access_token: await this.jwtService.signAsync(payload),
       name: user.name,
+      role: user.role,
     };
   }
 }

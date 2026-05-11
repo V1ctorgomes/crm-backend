@@ -2,9 +2,12 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards, UseInt
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TicketsService } from './tickets.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('tickets')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN', 'USER')
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 

@@ -35,19 +35,26 @@ export class UsersService {
 
   async create(actorUserId: string, actorRole: string, data: any) {
     if (!canManageAllUsers(actorRole)) {
-      throw new ForbiddenException('Apenas administradores podem criar utilizadores.');
+      throw new ForbiddenException('Apenas administradores ou developers podem criar utilizadores.');
     }
     const password = String(data.password || '');
     if (!password.trim()) {
       throw new ForbiddenException('Palavra-passe é obrigatória para novos utilizadores.');
     }
     const hashed = await bcrypt.hash(password, 10);
+    let role = 'USER';
+    if (actorRole === 'ADMIN') {
+      role = 'USER';
+    } else if (actorRole === 'DEVELOPER') {
+      const r = String(data.role || 'USER').toUpperCase();
+      role = r === 'DEVELOPER' ? 'DEVELOPER' : 'USER';
+    }
     return this.prisma.user.create({
       data: {
         name: data.name,
         email: data.email,
         password: hashed,
-        role: data.role && String(data.role).trim() !== '' ? String(data.role) : 'USER',
+        role,
       },
     });
   }
@@ -69,8 +76,17 @@ export class UsersService {
     if (data.name) updateData.name = data.name;
     if (data.email) updateData.email = data.email;
 
-    if (canManageAllUsers(actorRole) && data.role !== undefined && data.role !== null) {
-      updateData.role = String(data.role);
+    if (data.role !== undefined && data.role !== null && canManageAllUsers(actorRole)) {
+      if (actorRole === 'ADMIN') {
+        if (!isSelf) {
+          updateData.role = 'USER';
+        }
+      } else if (actorRole === 'DEVELOPER') {
+        const r = String(data.role).toUpperCase();
+        if (r === 'USER' || r === 'DEVELOPER') {
+          updateData.role = r;
+        }
+      }
     }
 
     if (data.password && String(data.password).trim() !== '') {
@@ -89,7 +105,7 @@ export class UsersService {
 
   async delete(actorUserId: string, actorRole: string, id: string) {
     if (!canManageAllUsers(actorRole)) {
-      throw new ForbiddenException('Apenas administradores podem remover utilizadores.');
+      throw new ForbiddenException('Apenas administradores ou developers podem remover utilizadores.');
     }
     if (actorUserId === id) {
       throw new ForbiddenException('Não pode remover a sua própria conta neste ecrã.');
