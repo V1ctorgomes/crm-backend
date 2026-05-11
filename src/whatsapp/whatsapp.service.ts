@@ -279,19 +279,56 @@ export class WhatsappService {
     else if (fileMimeType.startsWith('video')) { mediatype = 'video'; fallbackText = 'Vídeo'; }
     else if (fileMimeType.startsWith('audio')) { mediatype = 'audio'; fallbackText = 'Áudio'; }
 
+    const evolutionHeaders = { apikey: this.apiKey };
+
     try {
-      const response = await axios.post(
-        `${this.apiUrl}/message/sendMedia/${instanceName}`,
-        { 
-          number: cleanNumber, 
-          mediatype, 
-          mimetype: fileMimeType, 
-          caption, 
-          media: mediaUrl, 
-          fileName: fileOriginalName 
-        },
-        { headers: { apikey: this.apiKey } }
-      );
+      let response;
+
+      // Gravações do browser vêm em WebM/Opus; `sendMedia` com mediatype audio falha muitas vezes na Evolution.
+      // `sendWhatsAppAudio` + encoding transcodifica para formato aceite pelo WhatsApp (nota de voz).
+      if (fileMimeType.startsWith('audio/')) {
+        try {
+          response = await axios.post(
+            `${this.apiUrl}/message/sendWhatsAppAudio/${instanceName}`,
+            {
+              number: cleanNumber,
+              audio: mediaUrl,
+              encoding: true,
+            },
+            { headers: evolutionHeaders },
+          );
+        } catch (audioErr: any) {
+          this.logger.warn(
+            `sendWhatsAppAudio falhou (${audioErr?.response?.status}), fallback sendMedia como documento`,
+            audioErr?.response?.data || audioErr?.message,
+          );
+          response = await axios.post(
+            `${this.apiUrl}/message/sendMedia/${instanceName}`,
+            {
+              number: cleanNumber,
+              mediatype: 'document',
+              mimetype: fileMimeType,
+              caption: caption || '',
+              media: mediaUrl,
+              fileName: fileOriginalName,
+            },
+            { headers: evolutionHeaders },
+          );
+        }
+      } else {
+        response = await axios.post(
+          `${this.apiUrl}/message/sendMedia/${instanceName}`,
+          {
+            number: cleanNumber,
+            mediatype,
+            mimetype: fileMimeType,
+            caption,
+            media: mediaUrl,
+            fileName: fileOriginalName,
+          },
+          { headers: evolutionHeaders },
+        );
+      }
 
       const waId = response.data?.key?.id || Date.now().toString();
 
