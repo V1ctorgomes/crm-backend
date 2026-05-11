@@ -47,7 +47,7 @@ export class UsersService {
       role = 'USER';
     } else if (actorRole === 'DEVELOPER') {
       const r = String(data.role || 'USER').toUpperCase();
-      role = r === 'DEVELOPER' ? 'DEVELOPER' : 'USER';
+      role = r === 'USER' || r === 'DEVELOPER' || r === 'ADMIN' ? r : 'USER';
     }
     return this.prisma.user.create({
       data: {
@@ -83,7 +83,7 @@ export class UsersService {
         }
       } else if (actorRole === 'DEVELOPER') {
         const r = String(data.role).toUpperCase();
-        if (r === 'USER' || r === 'DEVELOPER') {
+        if (r === 'USER' || r === 'DEVELOPER' || r === 'ADMIN') {
           updateData.role = r;
         }
       }
