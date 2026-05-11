@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Subject } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from './r2.service';
+import { PushNotificationsService } from '../notifications/push-notifications.service';
 
 @Injectable()
 export class WhatsappService {
@@ -14,7 +15,11 @@ export class WhatsappService {
   private messageSubject = new Subject<any>();
   public readonly messageStream$ = this.messageSubject.asObservable();
 
-  constructor(private prisma: PrismaService, private r2Service: R2Service) {}
+  constructor(
+    private prisma: PrismaService,
+    private r2Service: R2Service,
+    private pushNotifications: PushNotificationsService,
+  ) {}
 
   private async getDefaultInstanceName(userId: string): Promise<string> {
     const inst = await this.prisma.instance.findFirst({ where: { status: 'connected', userId } });
@@ -125,6 +130,9 @@ export class WhatsappService {
 
     if (!text && !isMedia) text = "Mensagem não suportada";
 
+    let notifyInboundPush = false;
+    let inboundPushPreview = '';
+
     try {
       if (payload.event === 'messages.upsert' || payload.event === 'send.message') {
         const existingContact = await this.prisma.contact.findUnique({
@@ -176,6 +184,10 @@ export class WhatsappService {
                 fileName: fileName || null,
               },
             });
+            if (!isFromMe && payload.event === 'messages.upsert') {
+              notifyInboundPush = true;
+              inboundPushPreview = String(finalSidebarText).slice(0, 200);
+            }
           } catch (e: any) {
             if (e?.code === 'P2002') {
               this.logger.warn(`Mensagem duplicada ignorada (idempotência): ${scopedWaId}`);
@@ -195,6 +207,14 @@ export class WhatsappService {
       }
 
       this.messageSubject.next(payload);
+
+      if (notifyInboundPush) {
+        void this.pushNotifications.notifyWhatsappInbound(userId, {
+          contactName: pushName,
+          contactNumber,
+          preview: inboundPushPreview,
+        });
+      }
     } catch (e) {
       this.logger.error("Erro no processamento do Webhook", e);
     }

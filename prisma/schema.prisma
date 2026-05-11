@@ -8,22 +8,39 @@ datasource db {
 }
 
 model User {
-  id                String     @id @default(uuid())
-  email             String     @unique
+  id                String             @id @default(uuid())
+  email             String             @unique
   name              String
   password          String   
   profilePictureUrl String?    
-  role              String     @default("USER")
+  role              String             @default("USER")
   instances         Instance[]
   customers         Customer[]
   contacts          Contact[]
   messages          Message[]
   stages            Stage[]
   tickets           Ticket[]
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  pushSubscriptions PushSubscription[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@map("users")
+}
+
+/// Subscrições Web Push (navegador) por utilizador — usadas quando o CRM está fechado.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 model Instance {

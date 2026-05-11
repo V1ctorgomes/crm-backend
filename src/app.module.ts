@@ -11,12 +11,14 @@ import { UsersModule } from './users/users.module';
 import { InstancesModule } from './instances/instances.module';
 import { ProxiesModule } from './proxies/proxies.module';
 import { ProvidersModule } from './providers/providers.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
     PrismaModule, 
     CustomersModule, 
     AuthModule, 
+    NotificationsModule,
     WhatsappModule,
     TicketsModule,
     UsersModule,
