@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards } from '@nestjs/common';
 import { InstancesService } from './instances.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -8,28 +8,28 @@ export class InstancesController {
   constructor(private readonly instancesService: InstancesService) {}
 
   @Get('user/:userId')
-  findByUser(@Param('userId') userId: string) {
-    return this.instancesService.findByUser(userId);
+  findByUser(@Req() req: any) {
+    return this.instancesService.findByUser(req.user.userId);
   }
 
   @Post()
-  create(@Body() data: any) {
-    return this.instancesService.create(data);
+  create(@Req() req: any, @Body() data: any) {
+    return this.instancesService.create(req.user.userId, data);
   }
 
   // ROTA QUE FALTAVA PARA O BOTÃO "LER QR CODE" FUNCIONAR!
   @Get('connect/:name')
-  getQrCode(@Param('name') name: string) {
-    return this.instancesService.getQrCode(name);
+  getQrCode(@Req() req: any, @Param('name') name: string) {
+    return this.instancesService.getQrCode(req.user.userId, name);
   }
 
   @Put(':name/settings')
-  updateSettings(@Param('name') name: string, @Body() data: any) {
-    return this.instancesService.updateSettings(name, data);
+  updateSettings(@Req() req: any, @Param('name') name: string, @Body() data: any) {
+    return this.instancesService.updateSettings(req.user.userId, name, data);
   }
 
   @Delete(':name')
-  remove(@Param('name') name: string) {
-    return this.instancesService.remove(name);
+  remove(@Req() req: any, @Param('name') name: string) {
+    return this.instancesService.remove(req.user.userId, name);
   }
 }

@@ -15,6 +15,11 @@ model User {
   profilePictureUrl String?    
   role              String     @default("USER")
   instances         Instance[]
+  customers         Customer[]
+  contacts          Contact[]
+  messages          Message[]
+  stages            Stage[]
+  tickets           Ticket[]
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
@@ -40,16 +45,23 @@ model Instance {
 
 model Customer {
   id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
-  email     String   @unique
+  email     String
   phone     String?
   company   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([email, userId])
 }
 
 model Contact {
-  number            String    @id
+  id                String    @id @default(uuid())
+  number            String
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   instanceName      String?
   name              String?
   profilePictureUrl String?
@@ -60,13 +72,17 @@ model Contact {
   messages          Message[]
   tickets           Ticket[]
   updatedAt         DateTime  @updatedAt
+
+  @@unique([number, userId])
 }
 
 model Message {
   id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   instanceName  String?
   contactNumber String
-  contact       Contact  @relation(fields: [contactNumber], references: [number])
+  contact       Contact  @relation(fields: [contactNumber, userId], references: [number, userId], onDelete: Cascade)
   text          String   @db.Text
   type          String   
   isMedia       Boolean  @default(false)
@@ -78,6 +94,8 @@ model Message {
 
 model Stage {
   id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   color     String   @default("#e2e8f0")
   order     Int      @default(0)
@@ -89,8 +107,10 @@ model Stage {
 
 model Ticket {
   id               String       @id @default(uuid())
+  userId           String
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   contactNumber    String
-  contact          Contact      @relation(fields: [contactNumber], references: [number])
+  contact          Contact      @relation(fields: [contactNumber, userId], references: [number, userId], onDelete: Cascade)
   stageId          String
   stage            Stage        @relation(fields: [stageId], references: [id])
   marca            String?

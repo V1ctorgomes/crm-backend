@@ -7,21 +7,50 @@ export class TicketsService implements OnModuleInit {
   constructor(private prisma: PrismaService, private r2Service: R2Service) {}
 
   async onModuleInit() {
-    const count = await this.prisma.stage.count();
-    if (count === 0) {
-      await this.prisma.stage.create({ data: { name: 'Novo', order: 1, color: '#bfdbfe' } });
-      await this.prisma.stage.create({ data: { name: 'Em Análise', order: 2, color: '#fef08a' } });
-      await this.prisma.stage.create({ data: { name: 'Concluído', order: 3, color: '#bbf7d0' } });
+    // Stages padrão agora são por usuário e são criadas sob demanda.
+  }
+
+  private async ensureDefaultStages(userId: string) {
+    const count = await this.prisma.stage.count({ where: { userId } });
+    if (count > 0) return;
+
+    await this.prisma.stage.createMany({
+      data: [
+        { userId, name: 'Novo', order: 1, color: '#bfdbfe' },
+        { userId, name: 'Em Análise', order: 2, color: '#fef08a' },
+        { userId, name: 'Concluído', order: 3, color: '#bbf7d0' },
+      ],
+    });
+  }
+
+  private async ensureTicketOwner(userId: string, ticketId: string) {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id: ticketId, userId },
+      select: { id: true },
+    });
+    if (!ticket) {
+      throw new HttpException('Solicitação não encontrada.', HttpStatus.NOT_FOUND);
     }
   }
 
-  async getBoard() {
+  private async ensureStageOwner(userId: string, stageId: string) {
+    const stage = await this.prisma.stage.findFirst({
+      where: { id: stageId, userId },
+      select: { id: true },
+    });
+    if (!stage) {
+      throw new HttpException('Fase não encontrada.', HttpStatus.NOT_FOUND);
+    }
+  }
+
+  async getBoard(userId: string) {
+    await this.ensureDefaultStages(userId);
     return this.prisma.stage.findMany({
-      where: { isActive: true },
+      where: { userId, isActive: true },
       orderBy: { order: 'asc' },
       include: {
         tickets: {
-          where: { isArchived: false },
+          where: { userId, isArchived: false },
           include: { 
             contact: true, 
             notes: { orderBy: { createdAt: 'desc' } },
@@ -34,8 +63,9 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  async getFolders() {
+  async getFolders(userId: string) {
     const tickets = await this.prisma.ticket.findMany({
+      where: { userId },
       include: {
         contact: true,
         files: { orderBy: { createdAt: 'desc' } }
@@ -56,8 +86,9 @@ export class TicketsService implements OnModuleInit {
     return Array.from(map.values());
   }
 
-  async uploadTicketFile(ticketId: string, file: any, description?: string) {
+  async uploadTicketFile(userId: string, ticketId: string, file: any, description?: string) {
     if (!file) throw new HttpException('Arquivo ausente', HttpStatus.BAD_REQUEST);
+    await this.ensureTicketOwner(userId, ticketId);
     
     const fileUrl = await this.r2Service.uploadFile(file, `tickets/${ticketId}`);
     const safeName = Buffer.from(file.originalname, 'latin1').toString('utf8');
@@ -74,8 +105,10 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  async deleteTicketFile(fileId: string) {
-    const file = await this.prisma.ticketFile.findUnique({ where: { id: fileId } });
+  async deleteTicketFile(userId: string, fileId: string) {
+    const file = await this.prisma.ticketFile.findFirst({
+      where: { id: fileId, ticket: { userId } },
+    });
     if (file) {
        await this.r2Service.deleteFile(file.fileUrl);
        await this.prisma.ticketFile.delete({ where: { id: fileId } });
@@ -83,14 +116,15 @@ export class TicketsService implements OnModuleInit {
     return { success: true };
   }
 
-  async deleteTicket(id: string) {
+  async deleteTicket(userId: string, id: string) {
+    await this.ensureTicketOwner(userId, id);
     await this.r2Service.deleteFolder(`tickets/${id}`);
     return this.prisma.ticket.delete({ where: { id } });
   }
 
-  async getTicketByContact(contactNumber: string) {
+  async getTicketByContact(userId: string, contactNumber: string) {
     return this.prisma.ticket.findFirst({
-      where: { contactNumber, isArchived: false },
+      where: { userId, contactNumber, isArchived: false },
       include: { 
         contact: true, 
         stage: true, 
@@ -102,13 +136,14 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  async getAllStages() {
-    return this.prisma.stage.findMany({ orderBy: { order: 'asc' } });
+  async getAllStages(userId: string) {
+    await this.ensureDefaultStages(userId);
+    return this.prisma.stage.findMany({ where: { userId }, orderBy: { order: 'asc' } });
   }
 
-  async getArchivedTickets() {
+  async getArchivedTickets(userId: string) {
     return this.prisma.ticket.findMany({
-      where: { isArchived: true },
+      where: { userId, isArchived: true },
       include: { 
         contact: true, 
         stage: true, 
@@ -120,38 +155,56 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  async createStage(name: string, color: string) {
-    const count = await this.prisma.stage.count();
-    return this.prisma.stage.create({ data: { name, color: color || '#e2e8f0', order: count + 1 } });
+  async createStage(userId: string, name: string, color: string) {
+    const count = await this.prisma.stage.count({ where: { userId } });
+    return this.prisma.stage.create({ data: { userId, name, color: color || '#e2e8f0', order: count + 1 } });
   }
 
-  async updateStage(id: string, data: { name?: string; color?: string; isActive?: boolean }) {
+  async updateStage(userId: string, id: string, data: { name?: string; color?: string; isActive?: boolean }) {
+    await this.ensureStageOwner(userId, id);
     return this.prisma.stage.update({ where: { id }, data });
   }
 
-  async deleteStage(id: string) {
+  async deleteStage(userId: string, id: string) {
     const stage = await this.prisma.stage.findUnique({
-      where: { id }, include: { _count: { select: { tickets: true } } }
+      where: { id },
+      include: { _count: { select: { tickets: true } } },
     });
+    if (!stage || stage.userId !== userId) {
+      throw new HttpException('Fase não encontrada.', HttpStatus.NOT_FOUND);
+    }
     if (stage && stage._count.tickets > 0) {
       throw new HttpException('Não é possível apagar uma fase que contém solicitações.', HttpStatus.BAD_REQUEST);
     }
     return this.prisma.stage.delete({ where: { id } });
   }
 
-  async reorderStages(stages: { id: string; order: number }[]) {
+  async reorderStages(userId: string, stages: { id: string; order: number }[]) {
+    const ids = stages.map((s) => s.id);
+    const owned = await this.prisma.stage.count({ where: { userId, id: { in: ids } } });
+    if (owned !== ids.length) {
+      throw new HttpException('Fases inválidas.', HttpStatus.BAD_REQUEST);
+    }
     const updates = stages.map(s => this.prisma.stage.update({ where: { id: s.id }, data: { order: s.order } }));
     return this.prisma.$transaction(updates);
   }
 
-  // ATUALIZADO AQUI COM TICKET TYPE
-  async createTicket(data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string }) {
-    await this.prisma.contact.update({
-      where: { number: data.contactNumber },
-      data: { name: data.nome, email: data.email, cnpj: data.cpf }
+  async createTicket(userId: string, data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string }) {
+    await this.ensureStageOwner(userId, data.stageId);
+    await this.prisma.contact.upsert({
+      where: { number_userId: { number: data.contactNumber, userId } },
+      update: { name: data.nome, email: data.email, cnpj: data.cpf },
+      create: {
+        number: data.contactNumber,
+        userId,
+        name: data.nome,
+        email: data.email,
+        cnpj: data.cpf,
+      },
     });
     return this.prisma.ticket.create({
       data: { 
+        userId,
         contactNumber: data.contactNumber, 
         stageId: data.stageId, 
         marca: data.marca, 
@@ -163,11 +216,14 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  async updateTicketStage(ticketId: string, stageId: string) {
+  async updateTicketStage(userId: string, ticketId: string, stageId: string) {
+    await this.ensureTicketOwner(userId, ticketId);
+    await this.ensureStageOwner(userId, stageId);
     return this.prisma.ticket.update({ where: { id: ticketId }, data: { stageId } });
   }
 
-  async toggleArchiveTicket(ticketId: string, isArchived: boolean, resolution?: string, resolutionReason?: string) {
+  async toggleArchiveTicket(userId: string, ticketId: string, isArchived: boolean, resolution?: string, resolutionReason?: string) {
+    await this.ensureTicketOwner(userId, ticketId);
     const dataToUpdate: any = { isArchived };
 
     if (isArchived) {
@@ -181,15 +237,19 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.ticket.update({ where: { id: ticketId }, data: dataToUpdate });
   }
 
-  async addNote(ticketId: string, text: string) {
+  async addNote(userId: string, ticketId: string, text: string) {
+    await this.ensureTicketOwner(userId, ticketId);
     return this.prisma.note.create({ data: { ticketId, text } });
   }
 
-  async deleteNote(id: string) {
+  async deleteNote(userId: string, id: string) {
+    const note = await this.prisma.note.findFirst({ where: { id, ticket: { userId } } });
+    if (!note) throw new HttpException('Nota não encontrada.', HttpStatus.NOT_FOUND);
     return this.prisma.note.delete({ where: { id } });
   }
 
-  async addTask(ticketId: string, title: string, dueDate: string) {
+  async addTask(userId: string, ticketId: string, title: string, dueDate: string) {
+    await this.ensureTicketOwner(userId, ticketId);
     return this.prisma.task.create({
       data: {
         ticketId,
@@ -199,11 +259,15 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  async toggleTask(id: string, isCompleted: boolean) {
+  async toggleTask(userId: string, id: string, isCompleted: boolean) {
+    const task = await this.prisma.task.findFirst({ where: { id, ticket: { userId } } });
+    if (!task) throw new HttpException('Tarefa não encontrada.', HttpStatus.NOT_FOUND);
     return this.prisma.task.update({ where: { id }, data: { isCompleted } });
   }
 
-  async deleteTask(id: string) {
+  async deleteTask(userId: string, id: string) {
+    const task = await this.prisma.task.findFirst({ where: { id, ticket: { userId } } });
+    if (!task) throw new HttpException('Tarefa não encontrada.', HttpStatus.NOT_FOUND);
     return this.prisma.task.delete({ where: { id } });
   }
 }

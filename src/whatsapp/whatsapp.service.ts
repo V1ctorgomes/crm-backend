@@ -16,10 +16,22 @@ export class WhatsappService {
 
   constructor(private prisma: PrismaService, private r2Service: R2Service) {}
 
-  private async getDefaultInstanceName(): Promise<string> {
-    const inst = await this.prisma.instance.findFirst({ where: { status: 'connected' } });
+  private async getDefaultInstanceName(userId: string): Promise<string> {
+    const inst = await this.prisma.instance.findFirst({ where: { status: 'connected', userId } });
     if (!inst) throw new HttpException('Sem instância conectada.', HttpStatus.BAD_REQUEST);
     return inst.name;
+  }
+
+  private buildScopedMessageId(userId: string, waId: string): string {
+    return `${userId}:${waId}`;
+  }
+
+  private async getUserIdFromInstance(instanceName: string): Promise<string | null> {
+    const instance = await this.prisma.instance.findUnique({
+      where: { name: instanceName },
+      select: { userId: true },
+    });
+    return instance?.userId || null;
   }
 
   private async fetchProfilePicture(number: string, instanceName: string): Promise<string | undefined> {
@@ -43,6 +55,8 @@ export class WhatsappService {
     }
 
     const instanceName = String(payload.instance || '');
+    const userId = await this.getUserIdFromInstance(instanceName);
+    if (!userId) return;
     const payloadData = payload.data;
     const msgData = Array.isArray(payloadData) ? payloadData[0] : payloadData;
     
@@ -54,9 +68,10 @@ export class WhatsappService {
     const contactNumber = remoteJid.split('@')[0];
     const isFromMe = Boolean(msgData.key.fromMe);
     const waId = msgData.key.id ? String(msgData.key.id) : undefined;
+    const scopedWaId = waId ? this.buildScopedMessageId(userId, waId) : undefined;
     const pushName = msgData.pushName ? String(msgData.pushName) : contactNumber;
 
-    const msgExists = waId ? await this.prisma.message.findUnique({ where: { id: waId } }) : null;
+    const msgExists = scopedWaId ? await this.prisma.message.findUnique({ where: { id: scopedWaId } }) : null;
 
     const msg = msgData.message;
     let text = msg?.conversation || msg?.extendedTextMessage?.text || "";
@@ -104,7 +119,9 @@ export class WhatsappService {
 
     try {
       if (payload.event === 'messages.upsert' || payload.event === 'send.message') {
-        const existingContact = await this.prisma.contact.findUnique({ where: { number: contactNumber } });
+        const existingContact = await this.prisma.contact.findUnique({
+          where: { number_userId: { number: contactNumber, userId } },
+        });
         let picUrl = existingContact?.profilePictureUrl || undefined;
         
         if (!picUrl) {
@@ -114,7 +131,7 @@ export class WhatsappService {
         const finalSidebarText = text || fallbackSidebarText;
 
         await this.prisma.contact.upsert({
-          where: { number: contactNumber },
+          where: { number_userId: { number: contactNumber, userId } },
           update: { 
             lastMessage: finalSidebarText, 
             lastMessageTime: new Date(), 
@@ -122,6 +139,7 @@ export class WhatsappService {
             ...(picUrl && { profilePictureUrl: picUrl }) 
           },
           create: { 
+            userId,
             number: contactNumber, 
             name: pushName, 
             lastMessage: finalSidebarText, 
@@ -130,11 +148,12 @@ export class WhatsappService {
           }
         });
 
-        if (waId) {
+        if (scopedWaId) {
           if (!msgExists) {
             await this.prisma.message.create({
               data: { 
-                id: waId, 
+                id: scopedWaId,
+                userId,
                 instanceName, 
                 contactNumber, 
                 text, // Se for mídia sem legenda, grava vazio
@@ -164,8 +183,10 @@ export class WhatsappService {
     }
   }
 
-  async sendText(number: string, text: string, requestedInstanceName?: string) {
-    const instanceName = requestedInstanceName || await this.getDefaultInstanceName();
+  async sendText(userId: string, number: string, text: string, requestedInstanceName?: string) {
+    const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
+    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+    if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
     try {
       const response = await axios.post(
         `${this.apiUrl}/message/sendText/${instanceName}`, 
@@ -175,14 +196,22 @@ export class WhatsappService {
       const waId = response.data?.key?.id;
       
       await this.prisma.contact.upsert({
-        where: { number: number },
+        where: { number_userId: { number, userId } },
         update: { lastMessage: text, lastMessageTime: new Date(), instanceName },
-        create: { number: number, name: number, lastMessage: text, instanceName }
+        create: { number, userId, name: number, lastMessage: text, instanceName }
       });
 
       if (waId) {
         await this.prisma.message.create({ 
-          data: { id: String(waId), instanceName, contactNumber: number, text, type: 'sent', timestamp: new Date() } 
+          data: {
+            id: this.buildScopedMessageId(userId, String(waId)),
+            userId,
+            instanceName,
+            contactNumber: number,
+            text,
+            type: 'sent',
+            timestamp: new Date(),
+          },
         });
       }
       return { success: true, data: response.data };
@@ -191,8 +220,10 @@ export class WhatsappService {
     }
   }
 
-  async sendMedia(number: string, file: any, caption: string, requestedInstanceName?: string) {
-    const instanceName = requestedInstanceName || await this.getDefaultInstanceName();
+  async sendMedia(userId: string, number: string, file: any, caption: string, requestedInstanceName?: string) {
+    const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
+    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+    if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
     const cleanNumber = String(number).replace(/\D/g, '');
 
     const fileBuffer = file.buffer;
@@ -234,14 +265,15 @@ export class WhatsappService {
       const waId = response.data?.key?.id || Date.now().toString();
 
       await this.prisma.contact.upsert({
-        where: { number: cleanNumber },
+        where: { number_userId: { number: cleanNumber, userId } },
         update: { lastMessage: caption || fallbackText, lastMessageTime: new Date(), instanceName },
-        create: { number: cleanNumber, name: cleanNumber, lastMessage: caption || fallbackText, instanceName }
+        create: { number: cleanNumber, userId, name: cleanNumber, lastMessage: caption || fallbackText, instanceName }
       });
 
       const savedMessage = await this.prisma.message.create({
         data: {
-          id: String(waId), 
+          id: this.buildScopedMessageId(userId, String(waId)),
+          userId,
           instanceName, 
           contactNumber: cleanNumber, 
           text: caption || '', // Sem emoji e sem legenda se for vazio
@@ -261,34 +293,35 @@ export class WhatsappService {
     }
   }
 
-  async getContacts() {
+  async getContacts(userId: string) {
     try {
       return await this.prisma.contact.findMany({ 
+        where: { userId },
         orderBy: { lastMessageTime: 'desc' } 
       });
     } catch { return []; }
   }
 
-  async getChatHistory(number: string) {
+  async getChatHistory(userId: string, number: string) {
     try {
       return await this.prisma.message.findMany({ 
-        where: { contactNumber: number }, 
+        where: { userId, contactNumber: number }, 
         orderBy: { timestamp: 'asc' } 
       });
     } catch { return []; }
   }
 
-  async deleteConversation(number: string) {
+  async deleteConversation(userId: string, number: string) {
     try {
       await this.r2Service.deleteFolder(number);
 
       await this.prisma.message.deleteMany({ 
-        where: { contactNumber: number } 
+        where: { userId, contactNumber: number } 
       });
       
       try {
         await this.prisma.contact.update({ 
-          where: { number }, 
+          where: { number_userId: { number, userId } }, 
           data: { lastMessage: '', lastMessageTime: null } 
         });
       } catch (updateErr) {
@@ -301,9 +334,9 @@ export class WhatsappService {
     }
   }
 
-  async updateContact(number: string, data: any) {
+  async updateContact(userId: string, number: string, data: any) {
     return await this.prisma.contact.update({
-      where: { number },
+      where: { number_userId: { number, userId } },
       data: {
         name: data.name,
         email: data.email,
@@ -312,9 +345,9 @@ export class WhatsappService {
     });
   }
 
-  async removeContact(number: string) {
+  async removeContact(userId: string, number: string) {
     const contact = await this.prisma.contact.findUnique({
-      where: { number },
+      where: { number_userId: { number, userId } },
       include: { tickets: true }
     });
 
@@ -330,7 +363,7 @@ export class WhatsappService {
     }
 
     return await this.prisma.contact.delete({
-      where: { number },
+      where: { number_userId: { number, userId } },
     });
   }
 }

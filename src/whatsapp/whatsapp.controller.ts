@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Sse, MessageEvent, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Req, Sse, MessageEvent, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -25,47 +25,48 @@ export class WhatsappController {
 
   @Get('contacts')
   @UseGuards(JwtAuthGuard)
-  async getContacts() { 
-    return this.whatsappService.getContacts(); 
+  async getContacts(@Req() req: any) { 
+    return this.whatsappService.getContacts(req.user.userId); 
   }
 
   @Get('history/:number')
   @UseGuards(JwtAuthGuard)
-  async getChatHistory(@Param('number') number: string) { 
-    return this.whatsappService.getChatHistory(number); 
+  async getChatHistory(@Req() req: any, @Param('number') number: string) { 
+    return this.whatsappService.getChatHistory(req.user.userId, number); 
   }
 
   @Delete('history/:number')
   @UseGuards(JwtAuthGuard)
-  async deleteConversation(@Param('number') number: string) { 
-    return this.whatsappService.deleteConversation(number); 
+  async deleteConversation(@Req() req: any, @Param('number') number: string) { 
+    return this.whatsappService.deleteConversation(req.user.userId, number); 
   }
 
   @Post('send')
   @UseGuards(JwtAuthGuard)
-  async sendMessage(@Body() body: { number: string; text: string; instanceName?: string }) { 
-    return this.whatsappService.sendText(body.number, body.text, body.instanceName); 
+  async sendMessage(@Req() req: any, @Body() body: { number: string; text: string; instanceName?: string }) { 
+    return this.whatsappService.sendText(req.user.userId, body.number, body.text, body.instanceName); 
   }
 
   @Post('send-media')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileInterceptor('file'))
   async sendMedia(
+    @Req() req: any,
     @UploadedFile() file: any, 
     @Body() body: { number: string; caption: string; instanceName?: string }
   ) {
-    return this.whatsappService.sendMedia(body.number, file, body.caption || '', body.instanceName);
+    return this.whatsappService.sendMedia(req.user.userId, body.number, file, body.caption || '', body.instanceName);
   }
 
   @Put('contacts/:number')
   @UseGuards(JwtAuthGuard)
-  async updateContact(@Param('number') number: string, @Body() data: any) {
-    return this.whatsappService.updateContact(number, data);
+  async updateContact(@Req() req: any, @Param('number') number: string, @Body() data: any) {
+    return this.whatsappService.updateContact(req.user.userId, number, data);
   }
 
   @Delete('contacts/:number')
   @UseGuards(JwtAuthGuard)
-  async removeContact(@Param('number') number: string) {
-    return this.whatsappService.removeContact(number);
+  async removeContact(@Req() req: any, @Param('number') number: string) {
+    return this.whatsappService.removeContact(req.user.userId, number);
   }
 }

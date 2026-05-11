@@ -42,7 +42,7 @@ export class InstancesService {
     return this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
   }
 
-  async create(data: any) {
+  async create(userId: string, data: any) {
     // 1. Vai buscar as credenciais atualizadas à BD
     const { evoUrl, evoKey } = await this.getEvolutionCredentials();
 
@@ -116,7 +116,7 @@ export class InstancesService {
       return await this.prisma.instance.create({ 
         data: {
           name: data.name, 
-          userId: data.userId,
+          userId,
           rejectCalls: data.rejectCalls || false, 
           ignoreGroups: data.ignoreGroups || false,
           proxyHost: data.proxyHost || null, 
@@ -156,7 +156,8 @@ export class InstancesService {
     }
   }
 
-  async getQrCode(instanceName: string) {
+  async getQrCode(userId: string, instanceName: string) {
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
     try {
       const { evoUrl, evoKey } = await this.getEvolutionCredentials();
       const res = await axios.get(`${evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: evoKey } });
@@ -167,7 +168,8 @@ export class InstancesService {
     }
   }
 
-  async updateSettings(instanceName: string, data: any) {
+  async updateSettings(userId: string, instanceName: string, data: any) {
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
     try {
       const { evoUrl, evoKey } = await this.getEvolutionCredentials();
       await axios.post(`${evoUrl}/settings/set/${instanceName}`, {
@@ -179,7 +181,8 @@ export class InstancesService {
     }
   }
 
-  async remove(instanceName: string) {
+  async remove(userId: string, instanceName: string) {
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
     try { 
       const { evoUrl, evoKey } = await this.getEvolutionCredentials();
       await axios.delete(`${evoUrl}/instance/delete/${instanceName}`, { headers: { apikey: evoKey } }); 
