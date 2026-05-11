@@ -89,12 +89,20 @@ export class WhatsappService {
       mimeType = mediaObject.mimetype ? String(mediaObject.mimetype).split(';')[0] : 'application/octet-stream';
       const ext = mimeType.split('/')[1] || 'bin';
       fileName = mediaObject.fileName ? String(mediaObject.fileName) : `arquivo.${ext}`;
-      
+
       // Se não houver legenda, text fica vazio
       text = mediaObject.caption || text || "";
       fallbackSidebarText = msg?.imageMessage ? "Imagem" : msg?.documentMessage ? "Documento" : msg?.audioMessage ? "Áudio" : msg?.videoMessage ? "Vídeo" : "Mídia";
 
-      if (!msgExists) {
+      // `send.message` é o eco de envios feitos por nós em `sendMedia`/`sendText`.
+      // O ficheiro já está no R2 e a linha em `messages` é (ou está prestes a ser) criada pelo serviço de envio.
+      // Baixar/subir aqui causa um segundo objeto duplicado no balde e uma linha extra de mensagem.
+      // → Para `send.message`, nunca descarregar a mídia; só reusar o que `msgExists` tiver.
+      const isSelfEcho = payload.event === 'send.message';
+
+      if (msgExists) {
+        mediaUrl = msgExists.mediaData || undefined;
+      } else if (!isSelfEcho) {
         try {
           const response = await axios.post(
             `${this.apiUrl}/chat/getBase64FromMediaMessage/${instanceName}`,
@@ -111,8 +119,6 @@ export class WhatsappService {
           this.logger.error("Erro ao baixar mídia da Evolution", error);
           text = "Falha ao salvar mídia na nuvem";
         }
-      } else {
-        mediaUrl = msgExists.mediaData || undefined;
       }
     }
 
@@ -149,30 +155,31 @@ export class WhatsappService {
           }
         });
 
-        if (scopedWaId) {
-          if (!msgExists) {
-            try {
-              await this.prisma.message.create({
-                data: {
-                  id: scopedWaId,
-                  userId,
-                  instanceName,
-                  contactNumber,
-                  text,
-                  type: isFromMe ? 'sent' : 'received',
-                  timestamp: new Date(),
-                  isMedia,
-                  mediaData: mediaUrl || null,
-                  mimeType: mimeType || null,
-                  fileName: fileName || null,
-                },
-              });
-            } catch (e: any) {
-              if (e?.code === 'P2002') {
-                this.logger.warn(`Mensagem duplicada ignorada (idempotência): ${scopedWaId}`);
-              } else {
-                throw e;
-              }
+        // Em `send.message` (eco do nosso próprio envio) a linha é criada por sendMedia/sendText.
+        // Tentar criar aqui de novo causaria P2002 ou (pior) sobrescrever com mediaData=null.
+        const isSelfEchoEvent = payload.event === 'send.message';
+        if (scopedWaId && !msgExists && !isSelfEchoEvent) {
+          try {
+            await this.prisma.message.create({
+              data: {
+                id: scopedWaId,
+                userId,
+                instanceName,
+                contactNumber,
+                text,
+                type: isFromMe ? 'sent' : 'received',
+                timestamp: new Date(),
+                isMedia,
+                mediaData: mediaUrl || null,
+                mimeType: mimeType || null,
+                fileName: fileName || null,
+              },
+            });
+          } catch (e: any) {
+            if (e?.code === 'P2002') {
+              this.logger.warn(`Mensagem duplicada ignorada (idempotência): ${scopedWaId}`);
+            } else {
+              throw e;
             }
           }
         }
@@ -247,9 +254,18 @@ export class WhatsappService {
        throw new HttpException('Arquivo inválido ou ausente.', HttpStatus.BAD_REQUEST);
     }
 
+    // Chave determinística por chamada — qualquer reentrada/repetição sobrescreve o MESMO objeto,
+    // em vez de criar duplicados no balde do R2.
+    const stableObjectId = `${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     let mediaUrl = '';
     try {
-      mediaUrl = await this.r2Service.uploadBuffer(fileBuffer, fileOriginalName, fileMimeType, cleanNumber);
+      mediaUrl = await this.r2Service.uploadBuffer(
+        fileBuffer,
+        fileOriginalName,
+        fileMimeType,
+        cleanNumber,
+        stableObjectId,
+      );
     } catch (error) {
       this.logger.error('Erro ao fazer upload para R2', error);
       throw new HttpException('Falha ao salvar arquivo na nuvem', HttpStatus.INTERNAL_SERVER_ERROR);
@@ -284,9 +300,8 @@ export class WhatsappService {
       });
 
       const scopedId = this.buildScopedMessageId(userId, String(waId));
-      let savedMessage;
       try {
-        savedMessage = await this.prisma.message.create({
+        await this.prisma.message.create({
           data: {
             id: scopedId,
             userId,
@@ -303,21 +318,23 @@ export class WhatsappService {
         });
       } catch (e: any) {
         if (e?.code === 'P2002') {
-          savedMessage =
-            (await this.prisma.message.findUnique({ where: { id: scopedId } })) ||
-            ({
-              id: scopedId,
-              mediaData: mediaUrl,
-              mimeType: fileMimeType,
-              fileName: fileOriginalName,
-            } as any);
           this.logger.warn(`create mídia duplicada ignorada: ${scopedId}`);
         } else {
           throw e;
         }
       }
 
-      return { success: true, id: waId, mediaData: mediaUrl, ...(savedMessage || {}) };
+      // Devolve o waId "cru" (sem prefixo userId:) para que o frontend possa
+      // comparar diretamente com `msgData.key.id` quando o webhook send.message chegar
+      // — evitando duplicados visuais na conversa.
+      return {
+        success: true,
+        id: String(waId),
+        mediaData: mediaUrl,
+        mimeType: fileMimeType,
+        fileName: fileOriginalName,
+        isMedia: true,
+      };
     } catch (error: any) {
       this.logger.error("Erro API ao enviar mídia", error?.response?.data || error.message);
       throw new HttpException('Falha ao enviar arquivo', HttpStatus.BAD_REQUEST);
