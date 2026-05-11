@@ -10,28 +10,33 @@ export class UsersController {
 
   @Get()
   findAll(@Req() req: any) {
-    return this.usersService.findAll(req.user.userId);
+    return this.usersService.findAll(req.user.userId, req.user.role);
+  }
+
+  @Get('me')
+  findMe(@Req() req: any) {
+    return this.usersService.findMe(req.user.userId);
   }
 
   @Get(':id')
   findOne(@Req() req: any, @Param('id') id: string) {
-    return this.usersService.findOne(req.user.userId, id);
+    return this.usersService.findOne(req.user.userId, req.user.role, id);
   }
 
   @Post()
-  create(@Body() body: any) {
-    return this.usersService.create(body);
+  create(@Req() req: any, @Body() body: any) {
+    return this.usersService.create(req.user.userId, req.user.role, body);
   }
 
   // Endpoint modificado para aceitar ficheiros (foto de perfil)
   @Put(':id')
   @UseInterceptors(FileInterceptor('file'))
   update(@Req() req: any, @Param('id') id: string, @UploadedFile() file: any, @Body() body: any) {
-    return this.usersService.updateUser(req.user.userId, id, body, file);
+    return this.usersService.updateUser(req.user.userId, req.user.role, id, body, file);
   }
 
   @Delete(':id')
   delete(@Req() req: any, @Param('id') id: string) {
-    return this.usersService.delete(req.user.userId, id);
+    return this.usersService.delete(req.user.userId, req.user.role, id);
   }
 }
