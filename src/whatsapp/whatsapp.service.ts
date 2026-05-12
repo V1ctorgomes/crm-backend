@@ -9,8 +9,30 @@ import { PushNotificationsService } from '../notifications/push-notifications.se
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
-  private readonly apiUrl = String(process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
-  private readonly apiKey = String(process.env.EVOLUTION_API_KEY || '');
+
+  /** Cache curto das credenciais da Evolution (guardadas em BD por Developer → Provedores). */
+  private evolutionCredsCache: { baseUrl: string; apiKey: string; expiresAt: number } | null = null;
+  private static readonly EVOLUTION_CREDS_TTL_MS = 30_000;
+
+  private async getEvolutionCreds(): Promise<{ baseUrl: string; apiKey: string }> {
+    const now = Date.now();
+    if (this.evolutionCredsCache && this.evolutionCredsCache.expiresAt > now) {
+      return { baseUrl: this.evolutionCredsCache.baseUrl, apiKey: this.evolutionCredsCache.apiKey };
+    }
+    const provider = await this.prisma.provider.findUnique({ where: { name: 'evolution' } });
+    const envUrl = String(process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
+    const envKey = String(process.env.EVOLUTION_API_KEY || '');
+    const baseUrl = (provider?.baseUrl?.replace(/\/$/, '') || envUrl).trim();
+    const apiKey = (provider?.apiKey || envKey).trim();
+    if (!baseUrl || !apiKey) {
+      throw new HttpException(
+        'Evolution API não configurada. Configure em Developer → Provedores.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    this.evolutionCredsCache = { baseUrl, apiKey, expiresAt: now + WhatsappService.EVOLUTION_CREDS_TTL_MS };
+    return { baseUrl, apiKey };
+  }
 
   /** Janelas de tempo alinhadas ao WhatsApp (apagar / editar). */
   private static readonly WA_DELETE_MAX_MS = 50 * 60 * 60 * 1000; // 50 h
@@ -45,10 +67,11 @@ export class WhatsappService {
 
   private async fetchProfilePicture(number: string, instanceName: string): Promise<string | undefined> {
     try {
+      const { baseUrl, apiKey } = await this.getEvolutionCreds();
       const response = await axios.post(
-        `${this.apiUrl}/chat/fetchProfilePictureUrl/${instanceName}`,
+        `${baseUrl}/chat/fetchProfilePictureUrl/${instanceName}`,
         { number },
-        { headers: { apikey: this.apiKey } }
+        { headers: { apikey: apiKey } }
       );
       return response.data?.profilePictureUrl || undefined;
     } catch {
@@ -113,10 +136,11 @@ export class WhatsappService {
         mediaUrl = msgExists.mediaData || undefined;
       } else if (!isSelfEcho) {
         try {
+          const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
           const response = await axios.post(
-            `${this.apiUrl}/chat/getBase64FromMediaMessage/${instanceName}`,
+            `${evoBaseUrl}/chat/getBase64FromMediaMessage/${instanceName}`,
             { message: msgData },
-            { headers: { 'Content-Type': 'application/json', apikey: this.apiKey } }
+            { headers: { 'Content-Type': 'application/json', apikey: evoApiKey } }
           );
 
           if (response.data && response.data.base64) {
@@ -229,10 +253,11 @@ export class WhatsappService {
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
     try {
+      const { baseUrl, apiKey } = await this.getEvolutionCreds();
       const response = await axios.post(
-        `${this.apiUrl}/message/sendText/${instanceName}`, 
-        { number, text }, 
-        { headers: { apikey: this.apiKey } }
+        `${baseUrl}/message/sendText/${instanceName}`,
+        { number, text },
+        { headers: { apikey: apiKey } }
       );
       const waId = response.data?.key?.id;
       
@@ -315,7 +340,8 @@ export class WhatsappService {
     else if (fileMimeType.startsWith('video')) { mediatype = 'video'; fallbackText = 'Vídeo'; }
     else if (fileMimeType.startsWith('audio')) { mediatype = 'audio'; fallbackText = 'Áudio'; }
 
-    const evolutionHeaders = { apikey: this.apiKey };
+    const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
+    const evolutionHeaders = { apikey: evoApiKey };
 
     try {
       let response;
@@ -325,7 +351,7 @@ export class WhatsappService {
       if (fileMimeType.startsWith('audio/')) {
         try {
           response = await axios.post(
-            `${this.apiUrl}/message/sendWhatsAppAudio/${instanceName}`,
+            `${evoBaseUrl}/message/sendWhatsAppAudio/${instanceName}`,
             {
               number: cleanNumber,
               audio: mediaUrl,
@@ -339,7 +365,7 @@ export class WhatsappService {
             audioErr?.response?.data || audioErr?.message,
           );
           response = await axios.post(
-            `${this.apiUrl}/message/sendMedia/${instanceName}`,
+            `${evoBaseUrl}/message/sendMedia/${instanceName}`,
             {
               number: cleanNumber,
               mediatype: 'document',
@@ -353,7 +379,7 @@ export class WhatsappService {
         }
       } else {
         response = await axios.post(
-          `${this.apiUrl}/message/sendMedia/${instanceName}`,
+          `${evoBaseUrl}/message/sendMedia/${instanceName}`,
           {
             number: cleanNumber,
             mediatype,
@@ -574,10 +600,11 @@ export class WhatsappService {
     await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
 
     const remoteJid = this.buildRemoteJid(dto.contactNumber);
-    const evolutionHeaders = { apikey: this.apiKey, 'Content-Type': 'application/json' };
+    const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
+    const evolutionHeaders = { apikey: evoApiKey, 'Content-Type': 'application/json' };
 
     try {
-      await axios.delete(`${this.apiUrl}/chat/deleteMessageForEveryone/${encodeURIComponent(instanceName)}`, {
+      await axios.delete(`${evoBaseUrl}/chat/deleteMessageForEveryone/${encodeURIComponent(instanceName)}`, {
         headers: evolutionHeaders,
         data: {
           id: waId,
@@ -644,11 +671,12 @@ export class WhatsappService {
 
     const remoteJid = this.buildRemoteJid(dto.contactNumber);
     const cleanNumber = String(dto.contactNumber).replace(/\D/g, '');
-    const evolutionHeaders = { apikey: this.apiKey, 'Content-Type': 'application/json' };
+    const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
+    const evolutionHeaders = { apikey: evoApiKey, 'Content-Type': 'application/json' };
 
     try {
       await axios.post(
-        `${this.apiUrl}/chat/updateMessage/${encodeURIComponent(instanceName)}`,
+        `${evoBaseUrl}/chat/updateMessage/${encodeURIComponent(instanceName)}`,
         {
           number: cleanNumber,
           text,
