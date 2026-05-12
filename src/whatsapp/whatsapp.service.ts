@@ -12,6 +12,10 @@ export class WhatsappService {
   private readonly apiUrl = String(process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
   private readonly apiKey = String(process.env.EVOLUTION_API_KEY || '');
 
+  /** Janelas de tempo alinhadas ao WhatsApp (apagar / editar). */
+  private static readonly WA_DELETE_MAX_MS = 50 * 60 * 60 * 1000; // 50 h
+  private static readonly WA_EDIT_MAX_MS = 14 * 60 * 1000; // 14 min
+
   private messageSubject = new Subject<any>();
   public readonly messageStream$ = this.messageSubject.asObservable();
 
@@ -524,6 +528,14 @@ export class WhatsappService {
       throw new HttpException('Só pode apagar mensagens enviadas por si.', HttpStatus.BAD_REQUEST);
     }
 
+    const ageDeleteMs = Date.now() - msg.timestamp.getTime();
+    if (ageDeleteMs < 0 || ageDeleteMs > WhatsappService.WA_DELETE_MAX_MS) {
+      throw new HttpException(
+        'Só é possível apagar mensagens até 50 horas após o envio.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     const waId = this.extractWaMessageId(userId, msg.id);
     if (!waId) {
       throw new HttpException(
@@ -585,6 +597,14 @@ export class WhatsappService {
     }
     if (msg.isMedia) {
       throw new HttpException('Não é possível editar mensagens de mídia.', HttpStatus.BAD_REQUEST);
+    }
+
+    const ageEditMs = Date.now() - msg.timestamp.getTime();
+    if (ageEditMs < 0 || ageEditMs > WhatsappService.WA_EDIT_MAX_MS) {
+      throw new HttpException(
+        'Só é possível editar mensagens até 14 minutos após o envio.',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const waId = this.extractWaMessageId(userId, msg.id);
