@@ -259,7 +259,11 @@ export class WhatsappService {
           if (e?.code !== 'P2002') throw e;
         }
       }
-      return { success: true, data: response.data };
+      return {
+        success: true,
+        data: response.data,
+        messageId: waId ? this.buildScopedMessageId(userId, String(waId)) : undefined,
+      };
     } catch (e) { 
       throw new HttpException('Erro ao enviar', HttpStatus.BAD_REQUEST); 
     }
@@ -387,12 +391,10 @@ export class WhatsappService {
         }
       }
 
-      // Devolve o waId "cru" (sem prefixo userId:) para que o frontend possa
-      // comparar diretamente com `msgData.key.id` quando o webhook send.message chegar
-      // — evitando duplicados visuais na conversa.
       return {
         success: true,
         id: String(waId),
+        messageId: scopedId,
         mediaData: mediaUrl,
         mimeType: fileMimeType,
         fileName: fileOriginalName,
@@ -485,6 +487,16 @@ export class WhatsappService {
     return null;
   }
 
+  /** UI/SSE podem enviar só o id WA; na BD a chave é `userId:waId`. */
+  private async findUserMessageForAction(userId: string, contactNumber: string, messageId: string) {
+    const ids = messageId.includes(':')
+      ? [messageId]
+      : [messageId, this.buildScopedMessageId(userId, messageId)];
+    return this.prisma.message.findFirst({
+      where: { userId, contactNumber, id: { in: ids } },
+    });
+  }
+
   private buildRemoteJid(contactNumber: string): string {
     const digits = String(contactNumber).replace(/\D/g, '');
     return `${digits}@s.whatsapp.net`;
@@ -520,9 +532,7 @@ export class WhatsappService {
     userId: string,
     dto: { contactNumber: string; messageId: string; instanceName?: string },
   ) {
-    const msg = await this.prisma.message.findFirst({
-      where: { id: dto.messageId, userId, contactNumber: dto.contactNumber },
-    });
+    const msg = await this.findUserMessageForAction(userId, dto.contactNumber, dto.messageId);
     if (!msg) throw new HttpException('Mensagem não encontrada.', HttpStatus.NOT_FOUND);
     if (msg.type !== 'sent') {
       throw new HttpException('Só pode apagar mensagens enviadas por si.', HttpStatus.BAD_REQUEST);
@@ -588,9 +598,7 @@ export class WhatsappService {
     const text = String(dto.text ?? '').trim();
     if (!text) throw new HttpException('Texto inválido.', HttpStatus.BAD_REQUEST);
 
-    const msg = await this.prisma.message.findFirst({
-      where: { id: dto.messageId, userId, contactNumber: dto.contactNumber },
-    });
+    const msg = await this.findUserMessageForAction(userId, dto.contactNumber, dto.messageId);
     if (!msg) throw new HttpException('Mensagem não encontrada.', HttpStatus.NOT_FOUND);
     if (msg.type !== 'sent') {
       throw new HttpException('Só pode editar mensagens enviadas por si.', HttpStatus.BAD_REQUEST);
