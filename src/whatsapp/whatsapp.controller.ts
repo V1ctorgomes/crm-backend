@@ -53,6 +53,26 @@ export class WhatsappController {
     return this.whatsappService.sendText(req.user.userId, body.number, body.text, body.instanceName); 
   }
 
+  @Post('messages/delete-for-everyone')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
+  async deleteMessageForEveryone(
+    @Req() req: any,
+    @Body() body: { contactNumber: string; messageId: string; instanceName?: string },
+  ) {
+    return this.whatsappService.deleteMessageForEveryone(req.user.userId, body);
+  }
+
+  @Post('messages/update-text')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
+  async updateMessageText(
+    @Req() req: any,
+    @Body() body: { contactNumber: string; messageId: string; text: string; instanceName?: string },
+  ) {
+    return this.whatsappService.updateMessageText(req.user.userId, body);
+  }
+
   @Post('send-media')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')

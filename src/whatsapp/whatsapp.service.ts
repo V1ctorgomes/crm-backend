@@ -474,4 +474,166 @@ export class WhatsappService {
       where: { number_userId: { number, userId } },
     });
   }
+
+  private extractWaMessageId(userId: string, storedMessageId: string): string | null {
+    const prefix = `${userId}:`;
+    if (storedMessageId.startsWith(prefix)) return storedMessageId.slice(prefix.length);
+    return null;
+  }
+
+  private buildRemoteJid(contactNumber: string): string {
+    const digits = String(contactNumber).replace(/\D/g, '');
+    return `${digits}@s.whatsapp.net`;
+  }
+
+  private async refreshContactLastMessage(userId: string, contactNumber: string) {
+    const last = await this.prisma.message.findFirst({
+      where: { userId, contactNumber },
+      orderBy: { timestamp: 'desc' },
+    });
+    const preview =
+      last?.text?.trim() ||
+      (last?.isMedia ? 'Mídia' : '') ||
+      '';
+    try {
+      await this.prisma.contact.update({
+        where: { number_userId: { number: contactNumber, userId } },
+        data: {
+          lastMessage: preview,
+          lastMessageTime: last?.timestamp ?? null,
+        },
+      });
+    } catch {
+      /* contacto pode não existir */
+    }
+  }
+
+  /**
+   * Evolution API v2: DELETE /chat/deleteMessageForEveryone/{instance}
+   * Só mensagens enviadas por nós (fromMe), dentro do limite de tempo do WhatsApp.
+   */
+  async deleteMessageForEveryone(
+    userId: string,
+    dto: { contactNumber: string; messageId: string; instanceName?: string },
+  ) {
+    const msg = await this.prisma.message.findFirst({
+      where: { id: dto.messageId, userId, contactNumber: dto.contactNumber },
+    });
+    if (!msg) throw new HttpException('Mensagem não encontrada.', HttpStatus.NOT_FOUND);
+    if (msg.type !== 'sent') {
+      throw new HttpException('Só pode apagar mensagens enviadas por si.', HttpStatus.BAD_REQUEST);
+    }
+
+    const waId = this.extractWaMessageId(userId, msg.id);
+    if (!waId) {
+      throw new HttpException(
+        'Esta mensagem não tem ID do WhatsApp (histórico antigo). Não é possível apagar na Evolution.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const instanceName =
+      dto.instanceName || msg.instanceName || (await this.getDefaultInstanceName(userId));
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+
+    const remoteJid = this.buildRemoteJid(dto.contactNumber);
+    const evolutionHeaders = { apikey: this.apiKey, 'Content-Type': 'application/json' };
+
+    try {
+      await axios.delete(`${this.apiUrl}/chat/deleteMessageForEveryone/${encodeURIComponent(instanceName)}`, {
+        headers: evolutionHeaders,
+        data: {
+          id: waId,
+          remoteJid,
+          fromMe: true,
+          participant: '',
+        },
+      });
+    } catch (e: any) {
+      const detail =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        (Array.isArray(e?.response?.data?.message)
+          ? e.response.data.message.map((m: any) => m?.message || JSON.stringify(m)).join(', ')
+          : null) ||
+        e?.message;
+      this.logger.warn(`Evolution deleteMessageForEveryone: ${detail}`);
+      throw new HttpException(detail || 'Erro ao apagar mensagem na Evolution.', HttpStatus.BAD_REQUEST);
+    }
+
+    await this.prisma.message.delete({ where: { id: msg.id } });
+    await this.refreshContactLastMessage(userId, dto.contactNumber);
+    return { success: true };
+  }
+
+  /**
+   * Evolution API v2: POST /chat/updateMessage/{instance}
+   */
+  async updateMessageText(
+    userId: string,
+    dto: { contactNumber: string; messageId: string; text: string; instanceName?: string },
+  ) {
+    const text = String(dto.text ?? '').trim();
+    if (!text) throw new HttpException('Texto inválido.', HttpStatus.BAD_REQUEST);
+
+    const msg = await this.prisma.message.findFirst({
+      where: { id: dto.messageId, userId, contactNumber: dto.contactNumber },
+    });
+    if (!msg) throw new HttpException('Mensagem não encontrada.', HttpStatus.NOT_FOUND);
+    if (msg.type !== 'sent') {
+      throw new HttpException('Só pode editar mensagens enviadas por si.', HttpStatus.BAD_REQUEST);
+    }
+    if (msg.isMedia) {
+      throw new HttpException('Não é possível editar mensagens de mídia.', HttpStatus.BAD_REQUEST);
+    }
+
+    const waId = this.extractWaMessageId(userId, msg.id);
+    if (!waId) {
+      throw new HttpException(
+        'Esta mensagem não tem ID do WhatsApp (histórico antigo). Não é possível editar na Evolution.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const instanceName =
+      dto.instanceName || msg.instanceName || (await this.getDefaultInstanceName(userId));
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+
+    const remoteJid = this.buildRemoteJid(dto.contactNumber);
+    const cleanNumber = String(dto.contactNumber).replace(/\D/g, '');
+    const evolutionHeaders = { apikey: this.apiKey, 'Content-Type': 'application/json' };
+
+    try {
+      await axios.post(
+        `${this.apiUrl}/chat/updateMessage/${encodeURIComponent(instanceName)}`,
+        {
+          number: cleanNumber,
+          text,
+          key: {
+            remoteJid,
+            fromMe: true,
+            id: waId,
+          },
+        },
+        { headers: evolutionHeaders },
+      );
+    } catch (e: any) {
+      const detail =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        (Array.isArray(e?.response?.data?.message)
+          ? e.response.data.message.map((m: any) => m?.message || JSON.stringify(m)).join(', ')
+          : null) ||
+        e?.message;
+      this.logger.warn(`Evolution updateMessage: ${detail}`);
+      throw new HttpException(detail || 'Erro ao editar mensagem na Evolution.', HttpStatus.BAD_REQUEST);
+    }
+
+    await this.prisma.message.update({
+      where: { id: msg.id },
+      data: { text },
+    });
+    await this.refreshContactLastMessage(userId, dto.contactNumber);
+    return { success: true };
+  }
 }
