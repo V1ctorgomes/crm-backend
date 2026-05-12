@@ -264,8 +264,16 @@ export class WhatsappService {
         data: response.data,
         messageId: waId ? this.buildScopedMessageId(userId, String(waId)) : undefined,
       };
-    } catch (e) { 
-      throw new HttpException('Erro ao enviar', HttpStatus.BAD_REQUEST); 
+    } catch (e: any) {
+      const detail =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        (Array.isArray(e?.response?.data?.message)
+          ? e.response.data.message.map((m: any) => m?.message || JSON.stringify(m)).join(', ')
+          : null) ||
+        e?.message;
+      this.logger.error(`Evolution sendText falhou (${instanceName}): ${detail}`);
+      throw new HttpException(detail || 'Erro ao enviar pela Evolution.', HttpStatus.BAD_REQUEST);
     }
   }
 
@@ -401,8 +409,15 @@ export class WhatsappService {
         isMedia: true,
       };
     } catch (error: any) {
-      this.logger.error("Erro API ao enviar mídia", error?.response?.data || error.message);
-      throw new HttpException('Falha ao enviar arquivo', HttpStatus.BAD_REQUEST);
+      const detail =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        (Array.isArray(error?.response?.data?.message)
+          ? error.response.data.message.map((m: any) => m?.message || JSON.stringify(m)).join(', ')
+          : null) ||
+        error?.message;
+      this.logger.error(`Evolution sendMedia falhou (${instanceName}): ${detail}`);
+      throw new HttpException(detail || 'Falha ao enviar arquivo pela Evolution.', HttpStatus.BAD_REQUEST);
     }
   }
 
