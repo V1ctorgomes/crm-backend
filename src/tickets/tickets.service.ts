@@ -198,13 +198,15 @@ export class TicketsService implements OnModuleInit {
 
   async createTicket(userId: string, data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string }) {
     const d = sanitizeAndAssertCreateTicket(data);
-    await this.ticketCatalog.assertActiveLabels({
-      marca: d.marca,
-      modelo: d.modelo,
-      customerType: d.customerType,
-      ticketType: d.ticketType,
-    });
-    await this.ensureStageOwner(userId, d.stageId);
+    await Promise.all([
+      this.ticketCatalog.assertActiveLabels({
+        marca: d.marca,
+        modelo: d.modelo,
+        customerType: d.customerType,
+        ticketType: d.ticketType,
+      }),
+      this.ensureStageOwner(userId, d.stageId),
+    ]);
     await this.prisma.contact.upsert({
       where: { number_userId: { number: d.contactNumber, userId } },
       update: { name: d.nome, email: d.email, cnpj: d.cpf },
@@ -231,8 +233,10 @@ export class TicketsService implements OnModuleInit {
   }
 
   async updateTicketStage(userId: string, ticketId: string, stageId: string) {
-    await this.ensureTicketOwner(userId, ticketId);
-    await this.ensureStageOwner(userId, stageId);
+    await Promise.all([
+      this.ensureTicketOwner(userId, ticketId),
+      this.ensureStageOwner(userId, stageId),
+    ]);
     return this.prisma.ticket.update({ where: { id: ticketId }, data: { stageId } });
   }
 

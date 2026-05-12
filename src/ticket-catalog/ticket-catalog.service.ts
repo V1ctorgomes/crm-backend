@@ -99,11 +99,17 @@ export class TicketCatalogService {
       ['CUSTOMER_TYPE', data.customerType],
       ['TICKET_TYPE', data.ticketType],
     ];
+    const rows = await this.prisma.ticketCatalogItem.findMany({
+      where: {
+        isActive: true,
+        OR: checks.map(([category, label]) => ({ category, label })),
+      },
+      select: { category: true, label: true },
+    });
+    const foundLabels = new Set(rows.map((row) => `${row.category}:${row.label}`));
+
     for (const [category, label] of checks) {
-      const found = await this.prisma.ticketCatalogItem.findFirst({
-        where: { category, label, isActive: true },
-      });
-      if (!found) {
+      if (!foundLabels.has(`${category}:${label}`)) {
         const human =
           category === 'MARCA'
             ? 'Marca'

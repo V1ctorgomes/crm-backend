@@ -32,9 +32,7 @@ export class InstancesService {
     const instances = await this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
     
     try {
-      for (const inst of instances) {
-        await this.checkStatus(inst.name);
-      }
+      await Promise.allSettled(instances.map((inst) => this.checkStatus(inst.name)));
     } catch (e) {
       this.logger.warn('Não foi possível verificar o status das instâncias. Verifique as credenciais da API.');
     }

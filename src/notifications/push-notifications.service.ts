@@ -86,28 +86,30 @@ export class PushNotificationsService implements OnModuleInit {
       tag: `crm-wa-${opts.contactNumber}`,
     });
 
-    for (const s of subs) {
-      try {
-        await webPush.sendNotification(
-          {
-            endpoint: s.endpoint,
-            keys: { p256dh: s.p256dh, auth: s.auth },
-          },
-          payload,
-          { TTL: 3600 },
-        );
-      } catch (err: unknown) {
-        const status = (err as { statusCode?: number })?.statusCode;
-        if (status === 404 || status === 410) {
-          await this.prisma.pushSubscription
-            .delete({ where: { endpoint: s.endpoint } })
-            .catch(() => undefined);
-        } else {
-          this.logger.warn(
-            `Push falhou (${status}): ${(err as Error)?.message ?? err}`,
+    await Promise.allSettled(
+      subs.map(async (s) => {
+        try {
+          await webPush.sendNotification(
+            {
+              endpoint: s.endpoint,
+              keys: { p256dh: s.p256dh, auth: s.auth },
+            },
+            payload,
+            { TTL: 3600 },
           );
+        } catch (err: unknown) {
+          const status = (err as { statusCode?: number })?.statusCode;
+          if (status === 404 || status === 410) {
+            await this.prisma.pushSubscription
+              .delete({ where: { endpoint: s.endpoint } })
+              .catch(() => undefined);
+          } else {
+            this.logger.warn(
+              `Push falhou (${status}): ${(err as Error)?.message ?? err}`,
+            );
+          }
         }
-      }
-    }
+      }),
+    );
   }
 }
