@@ -7,7 +7,17 @@ export class InstancesService {
   private readonly logger = new Logger(InstancesService.name);
   
   // O webhookUrl mantém-se no .env pois é o endereço do próprio CRM
-  private readonly webhookUrl = process.env.WEBHOOK_URL; 
+  private readonly webhookUrl = process.env.WEBHOOK_URL;
+
+  /** Anexa `?token=` se existir WHATSAPP_WEBHOOK_SECRET (validação no POST /whatsapp/webhook). */
+  private buildWebhookUrlForEvolution(): string | undefined {
+    const base = this.webhookUrl?.trim();
+    if (!base) return undefined;
+    const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
+    if (!secret || base.includes('token=')) return base;
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}token=${encodeURIComponent(secret)}`;
+  }
 
   constructor(private prisma: PrismaService) {}
 
@@ -91,12 +101,13 @@ export class InstancesService {
       }
 
       // 4. Configuração do Webhook
-      if (this.webhookUrl) {
+      const webhookUrlResolved = this.buildWebhookUrlForEvolution();
+      if (webhookUrlResolved) {
         await new Promise(resolve => setTimeout(resolve, 1500));
         await axios.post(`${evoUrl}/webhook/set/${data.name}`, {
           webhook: {
             enabled: true,
-            url: this.webhookUrl,
+            url: webhookUrlResolved,
             byEvents: false, 
             base64: false,
             events: [

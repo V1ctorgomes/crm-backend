@@ -210,7 +210,7 @@ export class WhatsappService {
         }
       }
 
-      this.messageSubject.next(payload);
+      this.messageSubject.next({ ...payload, _crmUserId: userId });
 
       if (notifyInboundPush) {
         void this.pushNotifications.notifyWhatsappInbound(userId, {

@@ -1,7 +1,24 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Req, Sse, MessageEvent, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Req,
+  Sse,
+  MessageEvent,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  UnauthorizedException,
+  Query,
+  Headers,
+} from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { filter, map } from 'rxjs/operators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -12,16 +29,39 @@ export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}
 
   @Post('webhook')
-  async handleWebhook(@Body() payload: any) {
+  async handleWebhook(
+    @Body() payload: any,
+    @Headers('x-crm-webhook-secret') secretHeader?: string,
+    @Query('token') tokenQuery?: string,
+  ) {
+    const expected = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
+    if (expected) {
+      const ok = secretHeader === expected || tokenQuery === expected;
+      if (!ok) {
+        throw new UnauthorizedException('Webhook não autorizado.');
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new UnauthorizedException(
+        'Defina WHATSAPP_WEBHOOK_SECRET no servidor e use ?token=… na URL do webhook ou o header x-crm-webhook-secret.',
+      );
+    }
     return this.whatsappService.processWebhook(payload);
   }
 
   @Sse('stream')
-  // Nota: EventSource não consegue enviar headers Authorization facilmente.
-  // Por enquanto, mantemos o stream público para não quebrar o frontend.
-  stream(): Observable<MessageEvent> {
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER', 'DEVELOPER')
+  stream(@Req() req: any): Observable<MessageEvent> {
+    const userId = req.user.userId as string;
     return this.whatsappService.messageStream$.pipe(
-      map((data) => ({ data } as MessageEvent)),
+      filter((payload: any) => payload?._crmUserId === userId),
+      map((payload: any) => {
+        if (!payload || typeof payload !== 'object') {
+          return { data: '{}' } as MessageEvent;
+        }
+        const { _crmUserId: _removed, ...rest } = payload;
+        return { data: JSON.stringify(rest) } as MessageEvent;
+      }),
     );
   }
 

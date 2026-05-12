@@ -14,7 +14,7 @@ import { RolesGuard } from './roles.guard';
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'chave-secreta-super-segura-em-producao',
-      signOptions: { expiresIn: '1d' }, // O token expira em 1 dia
+      signOptions: { expiresIn: Number(process.env.JWT_EXPIRES_SEC) > 0 ? Number(process.env.JWT_EXPIRES_SEC) : 28800 },
     }),
   ],
   providers: [AuthService, JwtStrategy, RolesGuard],
