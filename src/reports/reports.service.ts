@@ -20,6 +20,13 @@ export interface FunnelStage {
   count: number;
 }
 
+export interface DailyPoint {
+  date: string;
+  messagesSent: number;
+  ticketsCreated: number;
+  ticketsArchived: number;
+}
+
 export interface TeamOverviewResponse {
   period: { from: string; to: string };
   totals: {
@@ -32,6 +39,7 @@ export interface TeamOverviewResponse {
   };
   perUser: PerUserStats[];
   funnel: FunnelStage[];
+  daily: DailyPoint[];
 }
 
 @Injectable()
@@ -132,13 +140,70 @@ export class ReportsService {
     const funnel = Array.from(funnelMap.values()).sort((a, b) => b.count - a.count);
     totals.openTickets = funnel.reduce((sum, f) => sum + f.count, 0);
 
+    const [sentMsgs, createdTickets, archivedTickets] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { type: 'sent', timestamp: { gte: from, lte: to } },
+        select: { timestamp: true },
+      }),
+      this.prisma.ticket.findMany({
+        where: { createdAt: { gte: from, lte: to } },
+        select: { createdAt: true },
+      }),
+      this.prisma.ticket.findMany({
+        where: { isArchived: true, updatedAt: { gte: from, lte: to } },
+        select: { updatedAt: true },
+      }),
+    ]);
+
+    const daily = buildDailySeries(from, to, sentMsgs, createdTickets, archivedTickets);
+
     return {
       period: { from: from.toISOString(), to: to.toISOString() },
       totals,
       perUser,
       funnel,
+      daily,
     };
   }
+}
+
+function dateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function buildDailySeries(
+  from: Date,
+  to: Date,
+  sentMsgs: { timestamp: Date }[],
+  createdTickets: { createdAt: Date }[],
+  archivedTickets: { updatedAt: Date }[],
+): DailyPoint[] {
+  const buckets = new Map<string, DailyPoint>();
+  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const end = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+  const cursor = new Date(start);
+  while (cursor.getTime() <= end.getTime()) {
+    const key = dateKey(cursor);
+    buckets.set(key, { date: key, messagesSent: 0, ticketsCreated: 0, ticketsArchived: 0 });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const ensure = (key: string): DailyPoint => {
+    const cur = buckets.get(key);
+    if (cur) return cur;
+    const item: DailyPoint = { date: key, messagesSent: 0, ticketsCreated: 0, ticketsArchived: 0 };
+    buckets.set(key, item);
+    return item;
+  };
+
+  for (const m of sentMsgs) ensure(dateKey(m.timestamp)).messagesSent += 1;
+  for (const t of createdTickets) ensure(dateKey(t.createdAt)).ticketsCreated += 1;
+  for (const t of archivedTickets) ensure(dateKey(t.updatedAt)).ticketsArchived += 1;
+
+  return Array.from(buckets.values()).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
 function mapByUser<T extends { userId: string; _count: { _all: number } }>(rows: T[]): Map<string, number> {
