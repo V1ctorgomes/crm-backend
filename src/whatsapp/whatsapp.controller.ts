@@ -75,8 +75,18 @@ export class WhatsappController {
   @Get('history/:number')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')
-  async getChatHistory(@Req() req: any, @Param('number') number: string) { 
-    return this.whatsappService.getChatHistory(req.user.userId, number); 
+  async getChatHistory(
+    @Req() req: any,
+    @Param('number') number: string,
+    @Query('limit') limitStr?: string,
+    @Query('before') beforeMessageId?: string,
+  ) {
+    const parsed = limitStr !== undefined && limitStr !== '' ? parseInt(limitStr, 10) : NaN;
+    const limit = Number.isFinite(parsed) ? parsed : undefined;
+    return this.whatsappService.getChatHistory(req.user.userId, number, {
+      limit,
+      beforeMessageId: beforeMessageId?.trim() || undefined,
+    });
   }
 
   @Delete('history/:number')

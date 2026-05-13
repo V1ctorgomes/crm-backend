@@ -456,13 +456,58 @@ export class WhatsappService {
     } catch { return []; }
   }
 
-  async getChatHistory(userId: string, number: string) {
+  /**
+   * Histórico paginado (estilo WhatsApp): por defeito as últimas `limit` mensagens;
+   * com `beforeMessageId`, mensagens mais antigas que essa (cursor).
+   * Resposta: `{ messages, hasMoreOlder }` (mensagens em ordem cronológica crescente).
+   */
+  async getChatHistory(
+    userId: string,
+    number: string,
+    opts?: { limit?: number; beforeMessageId?: string },
+  ) {
+    const rawLimit = opts?.limit ?? 80;
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 80, 1), 200);
+    const take = limit + 1;
+    const beforeId = opts?.beforeMessageId?.trim();
+
     try {
-      return await this.prisma.message.findMany({ 
-        where: { userId, contactNumber: number }, 
-        orderBy: { timestamp: 'asc' } 
+      if (beforeId) {
+        const cursor = await this.prisma.message.findFirst({
+          where: { userId, contactNumber: number, id: beforeId },
+          select: { id: true, timestamp: true },
+        });
+        if (!cursor) {
+          return { messages: [], hasMoreOlder: false };
+        }
+        const older = await this.prisma.message.findMany({
+          where: {
+            userId,
+            contactNumber: number,
+            OR: [
+              { timestamp: { lt: cursor.timestamp } },
+              { AND: [{ timestamp: cursor.timestamp }, { id: { lt: cursor.id } }] },
+            ],
+          },
+          orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
+          take,
+        });
+        const hasMoreOlder = older.length > limit;
+        const page = hasMoreOlder ? older.slice(0, limit) : older;
+        return { messages: page.reverse(), hasMoreOlder };
+      }
+
+      const recent = await this.prisma.message.findMany({
+        where: { userId, contactNumber: number },
+        orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
+        take,
       });
-    } catch { return []; }
+      const hasMoreOlder = recent.length > limit;
+      const page = hasMoreOlder ? recent.slice(0, limit) : recent;
+      return { messages: page.reverse(), hasMoreOlder };
+    } catch {
+      return { messages: [], hasMoreOlder: false };
+    }
   }
 
   async deleteConversation(userId: string, number: string) {
