@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import { getJwtSecret } from '../config/jwt-secret';
 
 function jwtFromCookieOrBearer(req: Request): string | null {
   const fromCookie = req?.cookies?.token;
@@ -18,7 +19,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: jwtFromCookieOrBearer,
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'chave-secreta-super-segura-em-producao',
+      secretOrKey: getJwtSecret(),
     });
   }
 

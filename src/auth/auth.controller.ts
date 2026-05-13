@@ -1,5 +1,6 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 
 @Controller('auth')
@@ -8,6 +9,7 @@ export class AuthController {
 
   @HttpCode(HttpStatus.OK)
   @Post('login')
+  @UseGuards(ThrottlerGuard)
   async signIn(
     @Body() signInDto: Record<string, any>,
     @Res({ passthrough: true }) res: Response,

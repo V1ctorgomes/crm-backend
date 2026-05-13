@@ -2,8 +2,11 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { json, urlencoded } from 'express';
 import cookieParser from 'cookie-parser';
+import { assertProductionEnvOrThrow } from './config/assert-production-env';
 
 async function bootstrap() {
+  assertProductionEnvOrThrow();
+
   const app = await NestFactory.create(AppModule);
 
   app.use(cookieParser());
