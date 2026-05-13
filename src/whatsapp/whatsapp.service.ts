@@ -57,6 +57,52 @@ export class WhatsappService {
     return `${userId}:${waId}`;
   }
 
+  /**
+   * Multer/browsers por vezes enviam gravações como `application/octet-stream`.
+   * Sem `audio/*` o CRM trata como documento e a Evolution cai no fallback errado (WebM como doc não chega ao WhatsApp).
+   */
+  private resolveUploadedMimeType(fileName: string, declaredMime: string): string {
+    const d = String(declaredMime || '').trim();
+    const lower = d.toLowerCase();
+    const fn = String(fileName || '').toLowerCase();
+    const ext = fn.includes('.') ? fn.slice(fn.lastIndexOf('.') + 1) : '';
+
+    if (lower && lower !== 'application/octet-stream' && lower !== 'binary/octet-stream') {
+      return d;
+    }
+
+    const map: Record<string, string> = {
+      webm: 'audio/webm',
+      m4a: 'audio/mp4',
+      mp4: 'audio/mp4',
+      opus: 'audio/ogg',
+      ogg: 'audio/ogg',
+      mp3: 'audio/mpeg',
+      wav: 'audio/wav',
+      aac: 'audio/aac',
+    };
+    if (ext && map[ext]) return map[ext];
+
+    return d || 'application/octet-stream';
+  }
+
+  /**
+   * Ficheiros `.webm` escolhidos pelo botão de anexar documento vêm quase sempre como `video/webm`.
+   * O envio pela Evolution como **vídeo** (sem faixa de vídeo) não chega ao WhatsApp; tratar como áudio/nota.
+   */
+  private coerceWebmAttachmentToAudioIfNeeded(fileName: string, mime: string): string {
+    const fn = String(fileName || '').toLowerCase();
+    const base = String(mime || '')
+      .toLowerCase()
+      .split(';')[0]
+      .trim();
+    if (!fn.endsWith('.webm')) return mime;
+    if (base === 'video/webm' || base === 'application/octet-stream') {
+      return 'audio/webm';
+    }
+    return mime;
+  }
+
   private async getUserIdFromInstance(instanceName: string): Promise<string | null> {
     const instance = await this.prisma.instance.findUnique({
       where: { name: instanceName },
@@ -322,7 +368,8 @@ export class WhatsappService {
       fileBuffer = await readFile(file.path);
     }
     const fileOriginalName = String(file?.originalname || 'arquivo.bin');
-    const fileMimeType = String(file?.mimetype || 'application/octet-stream');
+    let fileMimeType = this.resolveUploadedMimeType(fileOriginalName, String(file?.mimetype || 'application/octet-stream'));
+    fileMimeType = this.coerceWebmAttachmentToAudioIfNeeded(fileOriginalName, fileMimeType);
 
     if (!fileBuffer || fileBuffer.length === 0) {
       throw new HttpException('Arquivo inválido, vazio ou não recebido pelo servidor.', HttpStatus.BAD_REQUEST);
@@ -358,8 +405,21 @@ export class WhatsappService {
     try {
       let response;
 
-      // Gravações do browser vêm em WebM/Opus; `sendMedia` com mediatype audio falha muitas vezes na Evolution.
-      // `sendWhatsAppAudio` + encoding transcodifica para formato aceite pelo WhatsApp (nota de voz).
+      const postSendMedia = async (mediatype: 'document' | 'audio' | 'image' | 'video') =>
+        axios.post(
+          `${evoBaseUrl}/message/sendMedia/${instanceName}`,
+          {
+            number: cleanNumber,
+            mediatype,
+            mimetype: fileMimeType,
+            caption: caption || '',
+            media: mediaUrl,
+            fileName: fileOriginalName,
+          },
+          { headers: evolutionHeaders },
+        );
+
+      // Gravações do browser vêm em WebM/Opus; `sendWhatsAppAudio` + encoding transcodifica para nota de voz (PTT).
       if (fileMimeType.startsWith('audio/')) {
         try {
           response = await axios.post(
@@ -373,35 +433,21 @@ export class WhatsappService {
           );
         } catch (audioErr: any) {
           this.logger.warn(
-            `sendWhatsAppAudio falhou (${audioErr?.response?.status}), fallback sendMedia como documento`,
+            `sendWhatsAppAudio falhou (${audioErr?.response?.status}), a tentar sendMedia como áudio`,
             audioErr?.response?.data || audioErr?.message,
           );
-          response = await axios.post(
-            `${evoBaseUrl}/message/sendMedia/${instanceName}`,
-            {
-              number: cleanNumber,
-              mediatype: 'document',
-              mimetype: fileMimeType,
-              caption: caption || '',
-              media: mediaUrl,
-              fileName: fileOriginalName,
-            },
-            { headers: evolutionHeaders },
-          );
+          try {
+            response = await postSendMedia('audio');
+          } catch (audioMediaErr: any) {
+            this.logger.warn(
+              `sendMedia mediatype=audio falhou (${audioMediaErr?.response?.status}), fallback documento`,
+              audioMediaErr?.response?.data || audioMediaErr?.message,
+            );
+            response = await postSendMedia('document');
+          }
         }
       } else {
-        response = await axios.post(
-          `${evoBaseUrl}/message/sendMedia/${instanceName}`,
-          {
-            number: cleanNumber,
-            mediatype,
-            mimetype: fileMimeType,
-            caption,
-            media: mediaUrl,
-            fileName: fileOriginalName,
-          },
-          { headers: evolutionHeaders },
-        );
+        response = await postSendMedia(mediatype as 'document' | 'image' | 'video');
       }
 
       const waId = response.data?.key?.id || Date.now().toString();
