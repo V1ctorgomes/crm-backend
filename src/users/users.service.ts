@@ -83,6 +83,53 @@ export class UsersService {
     });
   }
 
+  async findPasswordResetRequests(actorRole: string) {
+    if (!canManageAllUsers(actorRole)) {
+      throw new ForbiddenException('Sem permissão para listar pedidos de palavra-passe.');
+    }
+    return this.prisma.passwordResetRequest.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, role: true, approved: true },
+        },
+      },
+    });
+  }
+
+  async completePasswordResetRequest(actorRole: string, requestId: string, rawPassword?: string) {
+    if (!canManageAllUsers(actorRole)) {
+      throw new ForbiddenException('Sem permissão para concluir este pedido.');
+    }
+    const pwd = String(rawPassword || '');
+    if (pwd.length < 8) {
+      throw new BadRequestException('A nova palavra-passe deve ter pelo menos 8 caracteres.');
+    }
+    const row = await this.prisma.passwordResetRequest.findUnique({
+      where: { id: requestId },
+      include: { user: { select: { id: true } } },
+    });
+    if (!row || row.status !== 'PENDING') {
+      throw new NotFoundException('Pedido não encontrado ou já foi tratado.');
+    }
+    const hashed = await bcrypt.hash(pwd, 10);
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: row.userId },
+        data: { password: hashed },
+      }),
+      this.prisma.passwordResetRequest.update({
+        where: { id: requestId },
+        data: { status: 'COMPLETED', completedAt: new Date() },
+      }),
+    ]);
+    return {
+      ok: true as const,
+      message: 'Nova palavra-passe definida. O utilizador pode iniciar sessão com a nova senha.',
+    };
+  }
+
   /** Perfil do utilizador autenticado (sidebar, configurações, instâncias). */
   async findMe(actorUserId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: actorUserId } });

@@ -23,10 +23,25 @@ model User {
   stages            Stage[]
   tickets           Ticket[]
   pushSubscriptions PushSubscription[]
+  passwordResetRequests PasswordResetRequest[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
   @@map("users")
+}
+
+/// Pedido de redefinição de palavra-passe (utilizador indica e-mail no login; admin define nova senha).
+model PasswordResetRequest {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      String    @default("PENDING")
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@map("password_reset_requests")
 }
 
 /// Subscrições Web Push (navegador) por utilizador — usadas quando o CRM está fechado.

@@ -25,6 +25,24 @@ export class UsersController {
     return this.usersService.approvePending(req.user.role, id);
   }
 
+  @Get('password-reset-requests')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'DEVELOPER')
+  listPasswordResetRequests(@Req() req: any) {
+    return this.usersService.findPasswordResetRequests(req.user.role);
+  }
+
+  @Post('password-reset-requests/:id/set-password')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'DEVELOPER')
+  setPasswordFromResetRequest(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { newPassword?: string },
+  ) {
+    return this.usersService.completePasswordResetRequest(req.user.role, id, body.newPassword);
+  }
+
   @Get()
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'DEVELOPER')

@@ -56,7 +56,39 @@ export class AuthService {
     };
   }
 
-  async signIn(email: string, pass: string): Promise<{ access_token: string; name: string; role: string }> {
+  /**
+   * «Esqueci a palavra-passe»: não envia e-mail; cria pedido para o admin definir uma nova senha na área de utilizadores.
+   * Resposta genérica se o e-mail não existir (evita enumeração de contas).
+   */
+  async requestPasswordReset(rawEmail?: string): Promise<{ ok: true; message: string }> {
+    const email = String(rawEmail || '')
+      .trim()
+      .toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('Indique um e-mail válido.');
+    }
+    const generic = {
+      ok: true as const,
+      message:
+        'Se este e-mail estiver associado a uma conta, o pedido foi registado. Um administrador definirá uma nova palavra-passe em Utilizadores.',
+    };
+    const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (!user) return generic;
+
+    await this.prisma.passwordResetRequest.updateMany({
+      where: { userId: user.id, status: 'PENDING' },
+      data: { status: 'CANCELLED', completedAt: new Date() },
+    });
+    await this.prisma.passwordResetRequest.create({
+      data: { userId: user.id, status: 'PENDING' },
+    });
+    return generic;
+  }
+
+  async signIn(rawEmail: string, pass: string): Promise<{ access_token: string; name: string; role: string }> {
+    const email = String(rawEmail || '')
+      .trim()
+      .toLowerCase();
     // 1. Procura o utilizador pelo email
     const user = await this.prisma.user.findUnique({
       where: { email },

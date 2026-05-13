@@ -19,6 +19,13 @@ export class AuthController {
   }
 
   @HttpCode(HttpStatus.OK)
+  @Post('request-password-reset')
+  @UseGuards(ThrottlerGuard)
+  async requestPasswordReset(@Body() body: Record<string, any>) {
+    return this.authService.requestPasswordReset(body.email);
+  }
+
+  @HttpCode(HttpStatus.OK)
   @Post('login')
   @UseGuards(ThrottlerGuard)
   async signIn(
