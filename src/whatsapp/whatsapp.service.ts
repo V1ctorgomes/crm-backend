@@ -316,20 +316,6 @@ export class WhatsappService {
       );
     }
 
-    const r2Configured = Boolean(
-      process.env.R2_ENDPOINT?.trim() &&
-        process.env.R2_ACCESS_KEY_ID?.trim() &&
-        process.env.R2_SECRET_ACCESS_KEY?.trim() &&
-        process.env.R2_BUCKET_NAME?.trim() &&
-        process.env.R2_PUBLIC_URL?.trim(),
-    );
-    if (!r2Configured) {
-      throw new HttpException(
-        'Envio de ficheiros não está configurado no servidor (variáveis R2_* em falta). Defina R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME e R2_PUBLIC_URL.',
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
-    }
-
     let fileBuffer: Buffer | undefined = file?.buffer;
     if (!fileBuffer && file?.path) {
       const { readFile } = await import('fs/promises');
