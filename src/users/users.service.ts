@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
 import * as bcrypt from 'bcrypt';
@@ -12,11 +12,75 @@ export class UsersService {
   constructor(private prisma: PrismaService, private r2Service: R2Service) {}
 
   async findAll(actorUserId: string, actorRole: string) {
+    const publicSelect = {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      approved: true,
+      createdAt: true,
+      updatedAt: true,
+      profilePictureUrl: true,
+    } as const;
     if (canManageAllUsers(actorRole)) {
-      return this.prisma.user.findMany({ orderBy: { createdAt: 'desc' } });
+      return this.prisma.user.findMany({
+        where: { approved: true },
+        orderBy: { createdAt: 'desc' },
+        select: publicSelect,
+      });
     }
-    const user = await this.prisma.user.findUnique({ where: { id: actorUserId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: actorUserId },
+      select: publicSelect,
+    });
     return user ? [user] : [];
+  }
+
+  /** Contas de registo público à espera de aprovação (só USER). */
+  async findPending(actorRole: string) {
+    if (!canManageAllUsers(actorRole)) {
+      throw new ForbiddenException('Sem permissão para listar pedidos pendentes.');
+    }
+    return this.prisma.user.findMany({
+      where: { approved: false, role: 'USER' },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        approved: true,
+        createdAt: true,
+        profilePictureUrl: true,
+      },
+    });
+  }
+
+  async approvePending(actorRole: string, userId: string) {
+    if (!canManageAllUsers(actorRole)) {
+      throw new ForbiddenException('Sem permissão para aprovar utilizadores.');
+    }
+    const u = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!u) throw new NotFoundException('Utilizador não encontrado.');
+    if (u.approved) {
+      throw new BadRequestException('Esta conta já está aprovada.');
+    }
+    if (u.role !== 'USER') {
+      throw new BadRequestException('Apenas pedidos de atendimento (USER) podem ser aprovados por este fluxo.');
+    }
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { approved: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        approved: true,
+        createdAt: true,
+        profilePictureUrl: true,
+      },
+    });
   }
 
   /** Perfil do utilizador autenticado (sidebar, configurações, instâncias). */
@@ -55,6 +119,7 @@ export class UsersService {
         email: data.email,
         password: hashed,
         role,
+        approved: true,
       },
     });
   }

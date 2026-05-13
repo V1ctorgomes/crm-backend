@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -9,6 +14,47 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService
   ) {}
+
+  /** Registo público: sempre perfil USER, aguarda aprovação de administrador. */
+  async registerPublic(raw: { email?: string; password?: string; name?: string }): Promise<{ ok: true; message: string }> {
+    const email = String(raw.email || '')
+      .trim()
+      .toLowerCase();
+    const password = String(raw.password || '');
+    const name = String(raw.name || '').trim();
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('Indique um e-mail válido.');
+    }
+    if (password.length < 8) {
+      throw new BadRequestException('A palavra-passe deve ter pelo menos 8 caracteres.');
+    }
+    if (name.length < 2) {
+      throw new BadRequestException('Indique o seu nome (mínimo 2 caracteres).');
+    }
+
+    const exists = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (exists) {
+      throw new ConflictException('Este e-mail já está registado.');
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    await this.prisma.user.create({
+      data: {
+        email,
+        name,
+        password: hashed,
+        role: 'USER',
+        approved: false,
+      },
+    });
+
+    return {
+      ok: true,
+      message:
+        'Pedido de acesso criado. Quando um administrador aprovar a sua conta, poderá iniciar sessão.',
+    };
+  }
 
   async signIn(email: string, pass: string): Promise<{ access_token: string; name: string; role: string }> {
     // 1. Procura o utilizador pelo email
@@ -27,6 +73,12 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
+    if (!user.approved) {
+      throw new UnauthorizedException(
+        'A sua conta ainda não foi aprovada por um administrador. Aguarde ou contacte a equipa.',
+      );
+    }
+
     // 3. Gera o JWT Token se tudo estiver correto
     const payload = { sub: user.id, email: user.email, role: user.role };
     
@@ -41,6 +93,7 @@ export class AuthService {
   async findRecentMembersForLogin(limit = 3) {
     const take = Math.min(Math.max(Number(limit) || 3, 1), 10);
     const users = await this.prisma.user.findMany({
+      where: { approved: true },
       take,
       orderBy: { createdAt: 'desc' },
       select: { id: true, name: true, profilePictureUrl: true },

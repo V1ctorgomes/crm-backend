@@ -7,6 +7,17 @@ import { AuthService } from './auth.service';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @HttpCode(HttpStatus.CREATED)
+  @Post('register')
+  @UseGuards(ThrottlerGuard)
+  async register(@Body() body: Record<string, any>) {
+    return this.authService.registerPublic({
+      email: body.email,
+      password: body.password,
+      name: body.name,
+    });
+  }
+
   @HttpCode(HttpStatus.OK)
   @Post('login')
   @UseGuards(ThrottlerGuard)

@@ -11,6 +11,20 @@ import { Roles } from '../auth/roles.decorator';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Get('pending')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'DEVELOPER')
+  findPending(@Req() req: any) {
+    return this.usersService.findPending(req.user.role);
+  }
+
+  @Post('pending/:id/approve')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'DEVELOPER')
+  approvePending(@Req() req: any, @Param('id') id: string) {
+    return this.usersService.approvePending(req.user.role, id);
+  }
+
   @Get()
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'DEVELOPER')

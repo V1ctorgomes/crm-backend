@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import type { Request } from 'express';
@@ -26,12 +26,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: any) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, email: true, role: true },
+      select: { id: true, email: true, role: true, approved: true },
     });
+    if (!user) {
+      throw new UnauthorizedException('Sessão inválida.');
+    }
+    if (!user.approved) {
+      throw new UnauthorizedException('Conta pendente de aprovação.');
+    }
     return {
-      userId: user?.id ?? payload.sub,
-      email: user?.email ?? payload.email,
-      role: user?.role ?? payload.role ?? 'USER',
+      userId: user.id,
+      email: user.email,
+      role: user.role,
     };
   }
 }
