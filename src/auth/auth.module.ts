@@ -12,7 +12,7 @@ import { getJwtSecret } from '../config/jwt-secret';
 @Module({
   imports: [
     ThrottlerModule.forRoot({
-      throttlers: [{ limit: 8, ttl: 900_000 }],
+      throttlers: [{ limit: 150, ttl: 900_000 }],
     }),
     PrismaModule,
     PassportModule,
