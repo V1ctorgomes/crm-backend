@@ -12,6 +12,7 @@ import { InstancesModule } from './instances/instances.module';
 import { ProxiesModule } from './proxies/proxies.module';
 import { ProvidersModule } from './providers/providers.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -23,8 +24,9 @@ import { NotificationsModule } from './notifications/notifications.module';
     TicketsModule,
     UsersModule,
     InstancesModule,
-    ProxiesModule,    // <-- NOVO
-    ProvidersModule   // <-- NOVO
+    ProxiesModule,
+    ProvidersModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
