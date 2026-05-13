@@ -20,6 +20,7 @@ import { WhatsappService } from './whatsapp.service';
 import { Observable } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -126,7 +127,12 @@ export class WhatsappController {
   @Post('send-media')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
   async sendMedia(
     @Req() req: any,
     @UploadedFile() file: any, 

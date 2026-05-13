@@ -306,14 +306,40 @@ export class WhatsappService {
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
-    const cleanNumber = String(number).replace(/\D/g, '');
+    const cleanNumber = String(number ?? '')
+      .trim()
+      .replace(/\D/g, '');
+    if (!cleanNumber) {
+      throw new HttpException(
+        'Número do contacto em falta ou inválido no pedido. Recarregue a conversa e tente novamente.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
-    const fileBuffer = file.buffer;
-    const fileOriginalName = String(file.originalname || 'arquivo.bin');
-    const fileMimeType = String(file.mimetype || 'application/octet-stream');
+    const r2Configured = Boolean(
+      process.env.R2_ENDPOINT?.trim() &&
+        process.env.R2_ACCESS_KEY_ID?.trim() &&
+        process.env.R2_SECRET_ACCESS_KEY?.trim() &&
+        process.env.R2_BUCKET_NAME?.trim() &&
+        process.env.R2_PUBLIC_URL?.trim(),
+    );
+    if (!r2Configured) {
+      throw new HttpException(
+        'Envio de ficheiros não está configurado no servidor (variáveis R2_* em falta). Defina R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME e R2_PUBLIC_URL.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
 
-    if (!fileBuffer) {
-       throw new HttpException('Arquivo inválido ou ausente.', HttpStatus.BAD_REQUEST);
+    let fileBuffer: Buffer | undefined = file?.buffer;
+    if (!fileBuffer && file?.path) {
+      const { readFile } = await import('fs/promises');
+      fileBuffer = await readFile(file.path);
+    }
+    const fileOriginalName = String(file?.originalname || 'arquivo.bin');
+    const fileMimeType = String(file?.mimetype || 'application/octet-stream');
+
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new HttpException('Arquivo inválido, vazio ou não recebido pelo servidor.', HttpStatus.BAD_REQUEST);
     }
 
     // Chave determinística por chamada — qualquer reentrada/repetição sobrescreve o MESMO objeto,
@@ -443,7 +469,20 @@ export class WhatsappService {
           : null) ||
         error?.message;
       this.logger.error(`Evolution sendMedia falhou (${instanceName}): ${detail}`);
-      throw new HttpException(detail || 'Falha ao enviar arquivo pela Evolution.', HttpStatus.BAD_REQUEST);
+      let userMessage = detail || 'Falha ao enviar arquivo pela Evolution.';
+      const hint =
+        ' Confirme que R2_PUBLIC_URL é HTTPS e público (o servidor Evolution precisa de conseguir descarregar o ficheiro).';
+      const lower = String(userMessage).toLowerCase();
+      if (
+        lower.includes('fetch') ||
+        lower.includes('download') ||
+        lower.includes('timeout') ||
+        lower.includes('econnrefused') ||
+        lower.includes('getaddrinfo')
+      ) {
+        userMessage += hint;
+      }
+      throw new HttpException(userMessage, HttpStatus.BAD_REQUEST);
     }
   }
 

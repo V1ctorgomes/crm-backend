@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { TicketsService } from './tickets.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -59,7 +60,12 @@ export class TicketsController {
   }
 
   @Post(':id/files')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
   uploadTicketFile(@Req() req: any, @Param('id') id: string, @UploadedFile() file: any, @Body('description') description?: string) {
     return this.ticketsService.uploadTicketFile(req.user.userId, id, file, description);
   }
