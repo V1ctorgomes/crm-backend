@@ -205,14 +205,30 @@ export class UsersService {
       updateData.password = await bcrypt.hash(String(data.password), 10);
     }
 
+    let previousProfilePictureUrl: string | null = null;
     if (file) {
+      const existing = await this.prisma.user.findUnique({
+        where: { id },
+        select: { profilePictureUrl: true },
+      });
+      previousProfilePictureUrl = existing?.profilePictureUrl ?? null;
       updateData.profilePictureUrl = await this.r2Service.uploadFile(file, this.r2Service.perfilPath(id));
     }
 
-    return this.prisma.user.update({
+    const user = await this.prisma.user.update({
       where: { id },
       data: updateData,
     });
+
+    if (file && previousProfilePictureUrl && previousProfilePictureUrl !== user.profilePictureUrl) {
+      const cfg = await this.r2Service.resolveR2FromEnvOrDb();
+      const base = cfg?.publicUrl?.replace(/\/+$/, '') ?? '';
+      if (base && previousProfilePictureUrl.startsWith(base)) {
+        await this.r2Service.deleteFile(previousProfilePictureUrl);
+      }
+    }
+
+    return user;
   }
 
   async delete(actorUserId: string, actorRole: string, id: string) {
