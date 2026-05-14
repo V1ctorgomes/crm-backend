@@ -357,7 +357,7 @@ export class WhatsappService {
       .replace(/\D/g, '');
     if (!cleanNumber) {
       throw new HttpException(
-        'Número do contacto em falta ou inválido no pedido. Recarregue a conversa e tente novamente.',
+        'Número do contato em falta ou inválido no pedido. Recarregue a conversa e tente novamente.',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -634,12 +634,12 @@ export class WhatsappService {
     });
 
     if (!contact) {
-      throw new HttpException('Contacto não encontrado.', HttpStatus.NOT_FOUND);
+      throw new HttpException('Contato não encontrado.', HttpStatus.NOT_FOUND);
     }
 
     if (contact.tickets && contact.tickets.length > 0) {
       throw new HttpException(
-        'Este contacto possui solicitações (OS) no Kanban e não pode ser excluído.', 
+        'Este contato possui solicitações (OS) no Kanban e não pode ser excluído.', 
         HttpStatus.BAD_REQUEST
       );
     }
@@ -688,7 +688,7 @@ export class WhatsappService {
         },
       });
     } catch {
-      /* contacto pode não existir */
+      /* contato pode não existir */
     }
   }
 

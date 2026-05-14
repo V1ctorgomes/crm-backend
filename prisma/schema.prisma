@@ -36,7 +36,7 @@ model User {
   @@map("users")
 }
 
-/// Pedido de redefinição de palavra-passe (utilizador indica e-mail no login; admin define nova senha).
+/// Pedido de redefinição de palavra-passe (usuario indica e-mail no login; admin define nova senha).
 model PasswordResetRequest {
   id          String    @id @default(uuid())
   userId      String
@@ -50,7 +50,7 @@ model PasswordResetRequest {
   @@map("password_reset_requests")
 }
 
-/// Subscrições Web Push (navegador) por utilizador — usadas quando o CRM está fechado.
+/// Subscrições Web Push (navegador) por usuario — usadas quando o CRM está fechado.
 model PushSubscription {
   id        String   @id @default(uuid())
   userId    String

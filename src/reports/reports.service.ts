@@ -46,7 +46,7 @@ export interface TeamOverviewResponse {
 export class ReportsService {
   constructor(private prisma: PrismaService) {}
 
-  /** Visão geral da equipa para ADMIN: agregados no período, por utilizador, e funil actual. */
+  /** Visão geral da equipe para ADMIN: agregados no período, por usuario, e funil actual. */
   async getTeamOverview(actorRole: string, fromIso?: string, toIso?: string): Promise<TeamOverviewResponse> {
     if (actorRole !== 'ADMIN' && actorRole !== 'DEVELOPER') {
       throw new ForbiddenException('Apenas administradores podem ver esta página.');

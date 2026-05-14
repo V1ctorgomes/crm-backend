@@ -80,11 +80,11 @@ export function sanitizeAndAssertCreateTicket(data: {
   stageId?: string;
 }): SanitizedCreateTicket {
   if (!String(data.contactNumber || '').trim()) {
-    throw new HttpException('O número de contacto é obrigatório.', HttpStatus.BAD_REQUEST);
+    throw new HttpException('O número de contato é obrigatório.', HttpStatus.BAD_REQUEST);
   }
   const contactNumber = onlyDigits(String(data.contactNumber || ''));
   if (!contactNumber || contactNumber.length < 10) {
-    throw new HttpException('Número de contacto inválido (mínimo 10 dígitos).', HttpStatus.BAD_REQUEST);
+    throw new HttpException('Número de contato inválido (mínimo 10 dígitos).', HttpStatus.BAD_REQUEST);
   }
 
   const stageId = String(data.stageId || '').trim();

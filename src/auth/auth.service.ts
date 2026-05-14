@@ -57,7 +57,7 @@ export class AuthService {
   }
 
   /**
-   * «Esqueci a palavra-passe»: não envia e-mail; cria pedido para o admin definir uma nova senha na área de utilizadores.
+   * «Esqueci a palavra-passe»: não envia e-mail; cria pedido para o admin definir uma nova senha na área de usuarios.
    * Resposta genérica se o e-mail não existir (evita enumeração de contas).
    */
   async requestPasswordReset(rawEmail?: string): Promise<{ ok: true; message: string }> {
@@ -70,7 +70,7 @@ export class AuthService {
     const generic = {
       ok: true as const,
       message:
-        'Se este e-mail estiver associado a uma conta, o pedido foi registado. Um administrador definirá uma nova palavra-passe em Utilizadores.',
+        'Se este e-mail estiver associado a uma conta, o pedido foi registado. Um administrador definirá uma nova palavra-passe na área de usuarios.',
     };
     const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (!user) return generic;
@@ -89,7 +89,7 @@ export class AuthService {
     const email = String(rawEmail || '')
       .trim()
       .toLowerCase();
-    // 1. Procura o utilizador pelo email
+    // 1. Procura o usuario pelo email
     const user = await this.prisma.user.findUnique({
       where: { email },
     });
@@ -107,7 +107,7 @@ export class AuthService {
 
     if (!user.approved) {
       throw new UnauthorizedException(
-        'A sua conta ainda não foi aprovada por um administrador. Aguarde ou contacte a equipa.',
+        'A sua conta ainda não foi aprovada por um administrador. Aguarde ou contacte a equipe.',
       );
     }
 

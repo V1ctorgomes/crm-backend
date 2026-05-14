@@ -58,10 +58,10 @@ export class UsersService {
 
   async approvePending(actorRole: string, userId: string) {
     if (!canManageAllUsers(actorRole)) {
-      throw new ForbiddenException('Sem permissão para aprovar utilizadores.');
+      throw new ForbiddenException('Sem permissão para aprovar usuarios.');
     }
     const u = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!u) throw new NotFoundException('Utilizador não encontrado.');
+    if (!u) throw new NotFoundException('Usuario não encontrado.');
     if (u.approved) {
       throw new BadRequestException('Esta conta já está aprovada.');
     }
@@ -126,14 +126,14 @@ export class UsersService {
     ]);
     return {
       ok: true as const,
-      message: 'Nova palavra-passe definida. O utilizador pode iniciar sessão com a nova senha.',
+      message: 'Nova palavra-passe definida. O usuario pode iniciar sessão com a nova senha.',
     };
   }
 
-  /** Perfil do utilizador autenticado (sidebar, configurações, instâncias). */
+  /** Perfil do usuario autenticado (sidebar, configurações, instâncias). */
   async findMe(actorUserId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: actorUserId } });
-    if (!user) throw new NotFoundException('Utilizador não encontrado.');
+    if (!user) throw new NotFoundException('Usuario não encontrado.');
     return user;
   }
 
@@ -146,11 +146,11 @@ export class UsersService {
 
   async create(actorUserId: string, actorRole: string, data: any) {
     if (!canManageAllUsers(actorRole)) {
-      throw new ForbiddenException('Apenas administradores ou developers podem criar utilizadores.');
+      throw new ForbiddenException('Apenas administradores ou developers podem criar usuarios.');
     }
     const password = String(data.password || '');
     if (!password.trim()) {
-      throw new ForbiddenException('Palavra-passe é obrigatória para novos utilizadores.');
+      throw new ForbiddenException('Palavra-passe é obrigatória para novos usuarios.');
     }
     const hashed = await bcrypt.hash(password, 10);
     let role = 'USER';
@@ -233,7 +233,7 @@ export class UsersService {
 
   async delete(actorUserId: string, actorRole: string, id: string) {
     if (!canManageAllUsers(actorRole)) {
-      throw new ForbiddenException('Apenas administradores ou developers podem remover utilizadores.');
+      throw new ForbiddenException('Apenas administradores ou developers podem remover usuarios.');
     }
     if (actorUserId === id) {
       throw new ForbiddenException('Não pode remover a sua própria conta neste ecrã.');
