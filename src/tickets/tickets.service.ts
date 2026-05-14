@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
-import { sanitizeAndAssertCreateTicket } from './ticket-create.validation';
+import { sanitizeAndAssertCreateTicket, sanitizeAndAssertUpdateTicket } from './ticket-create.validation';
 import { TicketCatalogService } from '../ticket-catalog/ticket-catalog.service';
 
 @Injectable()
@@ -223,6 +223,62 @@ export class TicketsService implements OnModuleInit {
         userId,
         contactNumber: d.contactNumber,
         stageId: d.stageId,
+        marca: d.marca,
+        modelo: d.modelo,
+        customerType: d.customerType,
+        ticketType: d.ticketType,
+      },
+      include: { contact: true, notes: true, files: true, tasks: true },
+    });
+  }
+
+  async updateTicketDetails(
+    userId: string,
+    ticketId: string,
+    raw: {
+      nome?: string;
+      email?: string;
+      cpf?: string;
+      marca?: string;
+      modelo?: string;
+      customerType?: string;
+      ticketType?: string;
+    },
+  ) {
+    const existing = await this.prisma.ticket.findFirst({
+      where: { id: ticketId, userId },
+      select: { contactNumber: true, isArchived: true },
+    });
+    if (!existing) {
+      throw new HttpException('Solicitação não encontrada.', HttpStatus.NOT_FOUND);
+    }
+    if (existing.isArchived) {
+      throw new HttpException('Não é possível editar uma solicitação encerrada.', HttpStatus.BAD_REQUEST);
+    }
+
+    const d = sanitizeAndAssertUpdateTicket(raw);
+    await this.ticketCatalog.assertActiveLabels({
+      marca: d.marca,
+      modelo: d.modelo,
+      customerType: d.customerType,
+      ticketType: d.ticketType,
+    });
+
+    await this.prisma.contact.upsert({
+      where: { number_userId: { number: existing.contactNumber, userId } },
+      update: { name: d.nome, email: d.email, cnpj: d.cpf },
+      create: {
+        number: existing.contactNumber,
+        userId,
+        name: d.nome,
+        email: d.email,
+        cnpj: d.cpf,
+      },
+    });
+
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
         marca: d.marca,
         modelo: d.modelo,
         customerType: d.customerType,

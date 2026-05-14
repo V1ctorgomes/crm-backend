@@ -54,6 +54,11 @@ export class TicketsController {
     return this.ticketsService.createTicket(req.user.userId, body);
   }
 
+  @Put(':id')
+  updateTicketDetails(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    return this.ticketsService.updateTicketDetails(req.user.userId, id, body);
+  }
+
   @Delete(':id')
   deleteTicket(@Req() req: any, @Param('id') id: string) {
     return this.ticketsService.deleteTicket(req.user.userId, id);
