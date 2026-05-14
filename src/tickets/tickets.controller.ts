@@ -59,11 +59,6 @@ export class TicketsController {
     return this.ticketsService.updateTicketDetails(req.user.userId, id, body);
   }
 
-  @Delete(':id')
-  deleteTicket(@Req() req: any, @Param('id') id: string) {
-    return this.ticketsService.deleteTicket(req.user.userId, id);
-  }
-
   @Post(':id/files')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -120,5 +115,11 @@ export class TicketsController {
   @Delete('tasks/:taskId')
   deleteTask(@Req() req: any, @Param('taskId') taskId: string) {
     return this.ticketsService.deleteTask(req.user.userId, taskId);
+  }
+
+  /** Por último: evita que `DELETE /tickets/:id` roube `DELETE /tickets/stages/:id` em alguns ambientes. */
+  @Delete(':id')
+  deleteTicket(@Req() req: any, @Param('id') id: string) {
+    return this.ticketsService.deleteTicket(req.user.userId, id);
   }
 }

@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit, HttpException, HttpStatus } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
 import { sanitizeAndAssertCreateTicket, sanitizeAndAssertUpdateTicket } from './ticket-create.validation';
@@ -183,7 +184,22 @@ export class TicketsService implements OnModuleInit {
     if (stage && stage._count.tickets > 0) {
       throw new HttpException('Não é possível apagar uma fase que contém solicitações.', HttpStatus.BAD_REQUEST);
     }
-    return this.prisma.stage.delete({ where: { id } });
+    try {
+      return await this.prisma.stage.delete({ where: { id } });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError) {
+        if (e.code === 'P2003') {
+          throw new HttpException(
+            'Não é possível apagar esta fase: ainda existem solicitações ou dados ligados a ela. Mova as OS para outra fase e tente novamente.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        if (e.code === 'P2025') {
+          throw new HttpException('Fase não encontrada.', HttpStatus.NOT_FOUND);
+        }
+      }
+      throw e;
+    }
   }
 
   async reorderStages(userId: string, stages: { id: string; order: number }[]) {
