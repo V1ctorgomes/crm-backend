@@ -174,19 +174,48 @@ export class TicketsService implements OnModuleInit {
   }
 
   async deleteStage(userId: string, id: string) {
-    const stage = await this.prisma.stage.findUnique({
-      where: { id },
-      include: { _count: { select: { tickets: true } } },
+    const stage = await this.prisma.stage.findFirst({
+      where: { id, userId },
+      select: { id: true },
     });
-    if (!stage || stage.userId !== userId) {
+    if (!stage) {
       throw new HttpException('Fase não encontrada.', HttpStatus.NOT_FOUND);
     }
-    if (stage && stage._count.tickets > 0) {
-      throw new HttpException('Não é possível apagar uma fase que contém solicitações.', HttpStatus.BAD_REQUEST);
+
+    const activeOnStage = await this.prisma.ticket.count({
+      where: { userId, stageId: id, isArchived: false },
+    });
+    if (activeOnStage > 0) {
+      throw new HttpException(
+        'Não é possível apagar uma fase que ainda contém solicitações ativas. Mova ou arquive todas as OS desta fase antes de apagar.',
+        HttpStatus.BAD_REQUEST,
+      );
     }
+
     try {
-      return await this.prisma.stage.delete({ where: { id } });
+      return await this.prisma.$transaction(async (tx) => {
+        const linked = await tx.ticket.count({ where: { userId, stageId: id } });
+        if (linked > 0) {
+          const fallback = await tx.stage.findFirst({
+            where: { userId, id: { not: id } },
+            orderBy: { order: 'asc' },
+            select: { id: true },
+          });
+          if (!fallback) {
+            throw new HttpException(
+              'Não é possível apagar esta fase: ainda há solicitações arquivadas nela e não existe outra fase para reatribuí-las. Crie outra fase ou altere a fase dessas OS nos arquivados.',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          await tx.ticket.updateMany({
+            where: { userId, stageId: id },
+            data: { stageId: fallback.id },
+          });
+        }
+        return tx.stage.delete({ where: { id } });
+      });
     } catch (e) {
+      if (e instanceof HttpException) throw e;
       if (e instanceof Prisma.PrismaClientKnownRequestError) {
         if (e.code === 'P2003') {
           throw new HttpException(
