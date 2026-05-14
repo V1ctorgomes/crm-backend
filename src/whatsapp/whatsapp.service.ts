@@ -606,13 +606,24 @@ export class WhatsappService {
   }
 
   async updateContact(userId: string, number: string, data: any) {
+    const updateData: Record<string, unknown> = {};
+    if (data.name !== undefined && data.name !== null) updateData.name = data.name;
+    if (data.email !== undefined) updateData.email = data.email;
+    if (data.cnpj !== undefined) updateData.cnpj = data.cnpj;
+    if (data.contactKind !== undefined && data.contactKind !== null) {
+      const k = String(data.contactKind).toUpperCase();
+      if (k === 'UNKNOWN' || k === 'CUSTOMER' || k === 'INTERNAL') {
+        updateData.contactKind = k;
+      }
+    }
+    if (Object.keys(updateData).length === 0) {
+      return await this.prisma.contact.findUniqueOrThrow({
+        where: { number_userId: { number, userId } },
+      });
+    }
     return await this.prisma.contact.update({
       where: { number_userId: { number, userId } },
-      data: {
-        name: data.name,
-        email: data.email,
-        cnpj: data.cnpj,
-      },
+      data: updateData as any,
     });
   }
 

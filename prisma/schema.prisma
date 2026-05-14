@@ -7,6 +7,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ContactKind {
+  UNKNOWN
+  CUSTOMER
+  INTERNAL
+}
+
 model User {
   id                String             @id @default(uuid())
   email             String             @unique
@@ -103,6 +109,8 @@ model Contact {
   lastMessageTime   DateTime?
   email             String?
   cnpj              String?
+  /// Classificação manual: cliente comercial vs colaborador no mesmo número.
+  contactKind       ContactKind @default(UNKNOWN)
   messages          Message[]
   tickets           Ticket[]
   updatedAt         DateTime  @updatedAt
