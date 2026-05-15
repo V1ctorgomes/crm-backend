@@ -4,7 +4,8 @@ import { onlyDigits, isValidCnpj } from './companies.validation';
 
 export type CnpjLookupResult = {
   legalName: string;
-  tradeName: string | null;
+  /** Sempre preenchido: `nome_fantasia` da API ou, se vazio, a própria razão social. */
+  tradeName: string;
   cnpj: string;
 };
 
@@ -50,12 +51,19 @@ export class BrasilApiCnpjService {
         throw new HttpException('Resposta da API de CNPJ incompleta.', HttpStatus.BAD_GATEWAY);
       }
 
-      const fantasia = String(data.nome_fantasia ?? '').trim();
+      const fantasiaRaw = String(data.nome_fantasia ?? '').trim();
+      const isPlaceholder =
+        !fantasiaRaw ||
+        /^n[ãa]o\s+informad[oa]$/i.test(fantasiaRaw) ||
+        fantasiaRaw === '-' ||
+        fantasiaRaw === '***';
+      /** Nome fantasia útil; quando a Receita não informa, repetimos a razão para o formulário não ficar vazio. */
+      const tradeName = isPlaceholder ? razao : fantasiaRaw;
       const cnpjResp = onlyDigits(String(data.cnpj ?? digits));
 
       return {
         legalName: razao,
-        tradeName: fantasia === '' ? null : fantasia,
+        tradeName,
         cnpj: cnpjResp.length === 14 ? cnpjResp : digits,
       };
     } catch (e) {
