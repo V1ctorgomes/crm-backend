@@ -71,28 +71,56 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
+  /**
+   * Estrutura hierárquica para a página de Arquivos: Empresa → Contato → OS.
+   * Tickets sem empresa vinculada ficam num bucket especial (`company: null`) para que
+   * o histórico continue acessível e o utilizador consiga corrigir o vínculo depois.
+   */
   async getFolders(userId: string) {
     const tickets = await this.prisma.ticket.findMany({
       where: { userId },
       include: {
         contact: true,
         company: true,
-        files: { orderBy: { createdAt: 'desc' } }
+        files: { orderBy: { createdAt: 'desc' } },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
 
-    const map = new Map();
+    const companies = new Map<
+      string,
+      {
+        company: { id: string; legalName: string; tradeName: string | null; cnpj: string } | null;
+        contacts: Map<string, { contact: any; tickets: any[] }>;
+      }
+    >();
+
     for (const t of tickets) {
-      if (!map.has(t.contactNumber)) {
-        map.set(t.contactNumber, {
-          contact: t.contact,
-          tickets: []
+      const companyKey = t.company?.id || '__no_company__';
+      if (!companies.has(companyKey)) {
+        companies.set(companyKey, {
+          company: t.company
+            ? {
+                id: t.company.id,
+                legalName: t.company.legalName,
+                tradeName: t.company.tradeName,
+                cnpj: t.company.cnpj,
+              }
+            : null,
+          contacts: new Map(),
         });
       }
-      map.get(t.contactNumber).tickets.push(t);
+      const bucket = companies.get(companyKey)!;
+      if (!bucket.contacts.has(t.contactNumber)) {
+        bucket.contacts.set(t.contactNumber, { contact: t.contact, tickets: [] });
+      }
+      bucket.contacts.get(t.contactNumber)!.tickets.push(t);
     }
-    return Array.from(map.values());
+
+    return Array.from(companies.values()).map((c) => ({
+      company: c.company,
+      contacts: Array.from(c.contacts.values()),
+    }));
   }
 
   async uploadTicketFile(userId: string, ticketId: string, file: any, description?: string) {
