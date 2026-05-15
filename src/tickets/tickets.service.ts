@@ -287,15 +287,20 @@ export class TicketsService implements OnModuleInit {
 
     const resolvedCompanyId = await this.resolveCompanyForTicket(userId, d.contactNumber, d.companyId);
 
+    // Com empresa na OS, «nome/cpf» do formulário são da empresa (cliente) — não sobrescrever o perfil do solicitante.
+    const contactUpdate = resolvedCompanyId
+      ? { email: d.email }
+      : { name: d.nome, email: d.email, cnpj: d.cpf };
+
     await this.prisma.contact.upsert({
       where: { number_userId: { number: d.contactNumber, userId } },
-      update: { name: d.nome, email: d.email, cnpj: d.cpf },
+      update: contactUpdate,
       create: {
         number: d.contactNumber,
         userId,
-        name: d.nome,
+        name: resolvedCompanyId ? d.contactNumber : d.nome,
         email: d.email,
-        cnpj: d.cpf,
+        cnpj: resolvedCompanyId ? null : d.cpf,
       },
     });
     return this.prisma.ticket.create({
