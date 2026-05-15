@@ -94,7 +94,14 @@ export function sanitizeAndAssertCreateTicket(data: {
     throw new HttpException('Fase (stageId) é obrigatória.', HttpStatus.BAD_REQUEST);
   }
 
-  minText(String(data.nome || ''), 'Nome completo');
+  const rawCompany = data.companyId === undefined || data.companyId === null ? '' : String(data.companyId).trim();
+  const companyId = rawCompany === '' ? null : rawCompany;
+
+  if (companyId) {
+    minText(String(data.nome || ''), 'Empresa (cliente)');
+  } else {
+    minText(String(data.nome || ''), 'Nome completo');
+  }
 
   const email = String(data.email || '').trim().toLowerCase();
   if (!email) throw new HttpException('O e-mail é obrigatório.', HttpStatus.BAD_REQUEST);
@@ -103,21 +110,32 @@ export function sanitizeAndAssertCreateTicket(data: {
   }
 
   const taxDigits = onlyDigits(String(data.cpf || ''));
-  if (!taxDigits) throw new HttpException('O CPF ou CNPJ é obrigatório.', HttpStatus.BAD_REQUEST);
-  if (taxDigits.length !== 11 && taxDigits.length !== 14) {
-    throw new HttpException('CPF deve ter 11 dígitos ou CNPJ 14 dígitos.', HttpStatus.BAD_REQUEST);
+  if (!taxDigits) {
+    throw new HttpException(
+      companyId ? 'O CPF do solicitante é obrigatório.' : 'O CPF ou CNPJ é obrigatório.',
+      HttpStatus.BAD_REQUEST,
+    );
   }
-  if (!isValidCpfOrCnpj(taxDigits)) {
-    throw new HttpException('CPF ou CNPJ inválido (dígitos verificadores incorretos).', HttpStatus.BAD_REQUEST);
+  if (companyId) {
+    if (taxDigits.length !== 11) {
+      throw new HttpException('O CPF do solicitante deve ter 11 dígitos.', HttpStatus.BAD_REQUEST);
+    }
+    if (!isValidCpf(taxDigits)) {
+      throw new HttpException('CPF do solicitante inválido (dígitos verificadores incorretos).', HttpStatus.BAD_REQUEST);
+    }
+  } else {
+    if (taxDigits.length !== 11 && taxDigits.length !== 14) {
+      throw new HttpException('CPF deve ter 11 dígitos ou CNPJ 14 dígitos.', HttpStatus.BAD_REQUEST);
+    }
+    if (!isValidCpfOrCnpj(taxDigits)) {
+      throw new HttpException('CPF ou CNPJ inválido (dígitos verificadores incorretos).', HttpStatus.BAD_REQUEST);
+    }
   }
 
   minText(String(data.marca || ''), 'Marca');
   minText(String(data.modelo || ''), 'Modelo');
   minText(String(data.customerType || ''), 'Tipo de cliente');
   minText(String(data.ticketType || ''), 'Tipo de solicitação');
-
-  const rawCompany = data.companyId === undefined || data.companyId === null ? '' : String(data.companyId).trim();
-  const companyId = rawCompany === '' ? null : rawCompany;
 
   return {
     contactNumber,

@@ -68,6 +68,7 @@ export class CompaniesService {
         number: l.contact.number,
         name: l.contact.name,
         email: l.contact.email,
+        cnpj: l.contact.cnpj,
         profilePictureUrl: l.contact.profilePictureUrl,
         contactKind: l.contact.contactKind,
       })),
