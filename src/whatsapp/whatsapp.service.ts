@@ -520,11 +520,23 @@ export class WhatsappService {
 
   async getContacts(userId: string) {
     try {
-      return await this.prisma.contact.findMany({ 
+      const rows = await this.prisma.contact.findMany({
         where: { userId },
-        orderBy: { lastMessageTime: 'desc' } 
+        orderBy: { lastMessageTime: 'desc' },
+        include: { companyLinks: { include: { company: true } } },
       });
-    } catch { return []; }
+      return rows.map(({ companyLinks, ...c }) => ({
+        ...c,
+        companies: (companyLinks || []).map((l) => ({
+          id: l.company.id,
+          legalName: l.company.legalName,
+          tradeName: l.company.tradeName,
+          cnpj: l.company.cnpj,
+        })),
+      }));
+    } catch {
+      return [];
+    }
   }
 
   /**

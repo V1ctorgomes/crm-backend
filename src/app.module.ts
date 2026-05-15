@@ -7,6 +7,7 @@ import { CustomersModule } from './customers/customers.module';
 import { AuthModule } from './auth/auth.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { TicketsModule } from './tickets/tickets.module';
+import { CompaniesModule } from './companies/companies.module';
 import { UsersModule } from './users/users.module';
 import { InstancesModule } from './instances/instances.module';
 import { ProxiesModule } from './proxies/proxies.module';
@@ -22,6 +23,7 @@ import { ReportsModule } from './reports/reports.module';
     NotificationsModule,
     WhatsappModule,
     TicketsModule,
+    CompaniesModule,
     UsersModule,
     InstancesModule,
     ProxiesModule,

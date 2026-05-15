@@ -58,11 +58,12 @@ export class TicketsService implements OnModuleInit {
       include: {
         tickets: {
           where: { userId, isArchived: false },
-          include: { 
-            contact: true, 
+          include: {
+            contact: true,
+            company: true,
             notes: { orderBy: { createdAt: 'desc' } },
-            tasks: { orderBy: { dueDate: 'asc' } }, 
-            files: { orderBy: { createdAt: 'desc' } } 
+            tasks: { orderBy: { dueDate: 'asc' } },
+            files: { orderBy: { createdAt: 'desc' } }
           },
           orderBy: { createdAt: 'desc' }
         }
@@ -75,6 +76,7 @@ export class TicketsService implements OnModuleInit {
       where: { userId },
       include: {
         contact: true,
+        company: true,
         files: { orderBy: { createdAt: 'desc' } }
       },
       orderBy: { createdAt: 'desc' }
@@ -133,14 +135,15 @@ export class TicketsService implements OnModuleInit {
   async getTicketByContact(userId: string, contactNumber: string) {
     return this.prisma.ticket.findFirst({
       where: { userId, contactNumber, isArchived: false },
-      include: { 
-        contact: true, 
-        stage: true, 
+      include: {
+        contact: true,
+        company: true,
+        stage: true,
         notes: { orderBy: { createdAt: 'desc' } },
         tasks: { orderBy: { dueDate: 'asc' } },
-        files: { orderBy: { createdAt: 'desc' } } 
+        files: { orderBy: { createdAt: 'desc' } }
       },
-      orderBy: { createdAt: 'desc' } 
+      orderBy: { createdAt: 'desc' }
     });
   }
 
@@ -152,12 +155,13 @@ export class TicketsService implements OnModuleInit {
   async getArchivedTickets(userId: string) {
     return this.prisma.ticket.findMany({
       where: { userId, isArchived: true },
-      include: { 
-        contact: true, 
-        stage: true, 
+      include: {
+        contact: true,
+        company: true,
+        stage: true,
         notes: { orderBy: { createdAt: 'desc' } },
         tasks: { orderBy: { dueDate: 'asc' } },
-        files: { orderBy: { createdAt: 'desc' } } 
+        files: { orderBy: { createdAt: 'desc' } }
       },
       orderBy: { updatedAt: 'desc' }
     });
@@ -241,7 +245,7 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.$transaction(updates);
   }
 
-  async createTicket(userId: string, data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string }) {
+  async createTicket(userId: string, data: { contactNumber: string, nome: string, email: string, cpf: string, marca: string, modelo: string, customerType?: string, ticketType?: string, stageId: string, companyId?: string | null }) {
     const d = sanitizeAndAssertCreateTicket(data);
     await Promise.all([
       this.ticketCatalog.assertActiveLabels({
@@ -252,6 +256,9 @@ export class TicketsService implements OnModuleInit {
       }),
       this.ensureStageOwner(userId, d.stageId),
     ]);
+
+    const resolvedCompanyId = await this.resolveCompanyForTicket(userId, d.contactNumber, d.companyId);
+
     await this.prisma.contact.upsert({
       where: { number_userId: { number: d.contactNumber, userId } },
       update: { name: d.nome, email: d.email, cnpj: d.cpf },
@@ -272,9 +279,53 @@ export class TicketsService implements OnModuleInit {
         modelo: d.modelo,
         customerType: d.customerType,
         ticketType: d.ticketType,
+        companyId: resolvedCompanyId,
       },
-      include: { contact: true, notes: true, files: true, tasks: true },
+      include: { contact: true, company: true, notes: true, files: true, tasks: true },
     });
+  }
+
+  /**
+   * Regras de companyId na criação de OS:
+   * - 0 empresas ligadas ao contacto: companyId tem de vir vazio.
+   * - 1 empresa ligada: usa-se essa (mesmo que body não a indique); se body indicar, tem de coincidir.
+   * - >1 empresas ligadas: body **tem** de indicar companyId e ele tem de estar ligado ao contacto.
+   */
+  private async resolveCompanyForTicket(userId: string, contactNumber: string, requestedId: string | null): Promise<string | null> {
+    const links = await this.prisma.contactCompany.findMany({
+      where: { userId, contactNumber },
+      select: { companyId: true },
+    });
+    const linkedIds = links.map((l) => l.companyId);
+
+    if (linkedIds.length === 0) {
+      if (requestedId) {
+        throw new HttpException(
+          'Este contacto ainda não tem empresas associadas. Associe uma empresa em Contatos antes de criar a OS.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return null;
+    }
+
+    if (linkedIds.length === 1) {
+      const only = linkedIds[0];
+      if (requestedId && requestedId !== only) {
+        throw new HttpException('A empresa indicada não está ligada a este contacto.', HttpStatus.BAD_REQUEST);
+      }
+      return only;
+    }
+
+    if (!requestedId) {
+      throw new HttpException(
+        'Este contacto tem várias empresas associadas. Seleccione qual é a solicitante desta OS.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (!linkedIds.includes(requestedId)) {
+      throw new HttpException('A empresa indicada não está ligada a este contacto.', HttpStatus.BAD_REQUEST);
+    }
+    return requestedId;
   }
 
   async updateTicketDetails(

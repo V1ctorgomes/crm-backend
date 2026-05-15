@@ -65,6 +65,7 @@ export type SanitizedCreateTicket = {
   customerType: string;
   ticketType: string;
   stageId: string;
+  companyId: string | null;
 };
 
 /** Lança HttpException 400 com mensagem em português se inválido. */
@@ -78,6 +79,7 @@ export function sanitizeAndAssertCreateTicket(data: {
   customerType?: string;
   ticketType?: string;
   stageId?: string;
+  companyId?: string | null;
 }): SanitizedCreateTicket {
   if (!String(data.contactNumber || '').trim()) {
     throw new HttpException('O número de contato é obrigatório.', HttpStatus.BAD_REQUEST);
@@ -114,6 +116,9 @@ export function sanitizeAndAssertCreateTicket(data: {
   minText(String(data.customerType || ''), 'Tipo de cliente');
   minText(String(data.ticketType || ''), 'Tipo de solicitação');
 
+  const rawCompany = data.companyId === undefined || data.companyId === null ? '' : String(data.companyId).trim();
+  const companyId = rawCompany === '' ? null : rawCompany;
+
   return {
     contactNumber,
     nome: String(data.nome).trim(),
@@ -124,6 +129,7 @@ export function sanitizeAndAssertCreateTicket(data: {
     customerType: String(data.customerType).trim(),
     ticketType: String(data.ticketType).trim(),
     stageId,
+    companyId,
   };
 }
 

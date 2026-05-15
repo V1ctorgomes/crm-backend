@@ -28,6 +28,7 @@ model User {
   messages          Message[]
   stages            Stage[]
   tickets           Ticket[]
+  companies         Company[]
   pushSubscriptions PushSubscription[]
   passwordResetRequests PasswordResetRequest[]
   createdAt         DateTime           @default(now())
@@ -113,9 +114,42 @@ model Contact {
   contactKind       ContactKind @default(UNKNOWN)
   messages          Message[]
   tickets           Ticket[]
+  companyLinks      ContactCompany[]
   updatedAt         DateTime  @updatedAt
 
   @@unique([number, userId])
+}
+
+/// Empresa reutilizável dentro do utilizador: um contacto pode estar ligado a várias; uma empresa a vários contactos.
+model Company {
+  id           String           @id @default(uuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legalName    String
+  tradeName    String?
+  cnpj         String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  contactLinks ContactCompany[]
+  tickets      Ticket[]
+
+  @@unique([userId, cnpj])
+  @@index([userId])
+  @@index([userId, legalName])
+}
+
+model ContactCompany {
+  id            String   @id @default(uuid())
+  userId        String
+  contactNumber String
+  companyId     String
+  contact       Contact  @relation(fields: [contactNumber, userId], references: [number, userId], onDelete: Cascade)
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, contactNumber, companyId])
+  @@index([userId, contactNumber])
+  @@index([companyId])
 }
 
 model Message {
@@ -155,6 +189,8 @@ model Ticket {
   contact          Contact      @relation(fields: [contactNumber, userId], references: [number, userId], onDelete: Cascade)
   stageId          String
   stage            Stage        @relation(fields: [stageId], references: [id])
+  companyId        String?
+  company          Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
   marca            String?
   modelo           String?
   customerType     String?
