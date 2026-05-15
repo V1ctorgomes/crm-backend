@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CompaniesService } from './companies.service';
+import { BrasilApiCnpjService } from './brasilapi-cnpj.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -19,7 +20,10 @@ import { Roles } from '../auth/roles.decorator';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'USER')
 export class CompaniesController {
-  constructor(private readonly service: CompaniesService) {}
+  constructor(
+    private readonly service: CompaniesService,
+    private readonly brasilApiCnpj: BrasilApiCnpjService,
+  ) {}
 
   @Get()
   list(@Req() req: any, @Query('search') search?: string) {
@@ -29,6 +33,12 @@ export class CompaniesController {
   @Get('contact/:number')
   listForContact(@Req() req: any, @Param('number') number: string) {
     return this.service.listForContact(req.user.userId, number);
+  }
+
+  /** Consulta Razão Social / Nome Fantasia na Brasil API (URL base em BRASILAPI_CNPJ_BASE_URL). */
+  @Get('lookup/cnpj/:cnpj')
+  lookupCnpj(@Param('cnpj') cnpj: string) {
+    return this.brasilApiCnpj.lookup(cnpj);
   }
 
   @Get(':id')
