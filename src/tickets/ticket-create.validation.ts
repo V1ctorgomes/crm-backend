@@ -141,6 +141,8 @@ export type SanitizedUpdateTicket = {
   modelo: string;
   customerType: string;
   ticketType: string;
+  /** `string`: nova empresa; `null`: desvincular; `undefined`: manter como está. */
+  companyId: string | null | undefined;
 };
 
 /** Actualiza dados da OS e do contacto; não altera número nem fase. */
@@ -152,6 +154,7 @@ export function sanitizeAndAssertUpdateTicket(data: {
   modelo?: string;
   customerType?: string;
   ticketType?: string;
+  companyId?: string | null;
 }): SanitizedUpdateTicket {
   minText(String(data.nome || ''), 'Nome completo');
 
@@ -175,6 +178,16 @@ export function sanitizeAndAssertUpdateTicket(data: {
   minText(String(data.customerType || ''), 'Tipo de cliente');
   minText(String(data.ticketType || ''), 'Tipo de solicitação');
 
+  let companyId: string | null | undefined;
+  if (data.companyId === undefined) {
+    companyId = undefined;
+  } else if (data.companyId === null) {
+    companyId = null;
+  } else {
+    const trimmed = String(data.companyId).trim();
+    companyId = trimmed === '' ? null : trimmed;
+  }
+
   return {
     nome: String(data.nome).trim(),
     email,
@@ -183,5 +196,6 @@ export function sanitizeAndAssertUpdateTicket(data: {
     modelo: String(data.modelo).trim(),
     customerType: String(data.customerType).trim(),
     ticketType: String(data.ticketType).trim(),
+    companyId,
   };
 }

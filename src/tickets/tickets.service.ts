@@ -339,6 +339,7 @@ export class TicketsService implements OnModuleInit {
       modelo?: string;
       customerType?: string;
       ticketType?: string;
+      companyId?: string | null;
     },
   ) {
     const existing = await this.prisma.ticket.findFirst({
@@ -360,6 +361,25 @@ export class TicketsService implements OnModuleInit {
       ticketType: d.ticketType,
     });
 
+    let companyUpdate: { companyId: string | null } | null = null;
+    if (d.companyId !== undefined) {
+      if (d.companyId === null) {
+        companyUpdate = { companyId: null };
+      } else {
+        const link = await this.prisma.contactCompany.findFirst({
+          where: { userId, contactNumber: existing.contactNumber, companyId: d.companyId },
+          select: { companyId: true },
+        });
+        if (!link) {
+          throw new HttpException(
+            'A empresa indicada não está vinculada a este contato.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        companyUpdate = { companyId: d.companyId };
+      }
+    }
+
     await this.prisma.contact.upsert({
       where: { number_userId: { number: existing.contactNumber, userId } },
       update: { name: d.nome, email: d.email, cnpj: d.cpf },
@@ -379,8 +399,9 @@ export class TicketsService implements OnModuleInit {
         modelo: d.modelo,
         customerType: d.customerType,
         ticketType: d.ticketType,
+        ...(companyUpdate || {}),
       },
-      include: { contact: true, notes: true, files: true, tasks: true },
+      include: { contact: true, company: true, notes: true, files: true, tasks: true },
     });
   }
 
