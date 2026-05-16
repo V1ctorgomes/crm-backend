@@ -30,7 +30,7 @@ export class CompaniesService {
     const companies = await this.prisma.company.findMany({
       where,
       orderBy: { legalName: 'asc' },
-      include: { _count: { select: { contactLinks: true } } },
+      include: { _count: { select: { contactLinks: true, tickets: true } } },
     });
     return companies.map((c) => ({
       id: c.id,
@@ -38,6 +38,7 @@ export class CompaniesService {
       tradeName: c.tradeName,
       cnpj: c.cnpj,
       contactCount: c._count.contactLinks,
+      ticketCount: c._count.tickets,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     }));
@@ -52,6 +53,7 @@ export class CompaniesService {
           include: { contact: true },
           orderBy: { createdAt: 'asc' },
         },
+        _count: { select: { tickets: true } },
       },
     });
     if (!company) {
@@ -64,6 +66,7 @@ export class CompaniesService {
       cnpj: company.cnpj,
       createdAt: company.createdAt,
       updatedAt: company.updatedAt,
+      ticketCount: company._count.tickets,
       contacts: company.contactLinks.map((l) => ({
         number: l.contact.number,
         name: l.contact.name,
@@ -113,6 +116,16 @@ export class CompaniesService {
   async remove(userId: string, id: string) {
     const existing = await this.prisma.company.findFirst({ where: { id, userId } });
     if (!existing) throw new HttpException('Empresa não encontrada.', HttpStatus.NOT_FOUND);
+    const osCount = await this.prisma.ticket.count({
+      where: { userId, companyId: id },
+    });
+    if (osCount > 0) {
+      const osLabel = osCount === 1 ? '1 ordem de serviço vinculada' : `${osCount} ordens de serviço vinculadas`;
+      throw new HttpException(
+        `Não é possível eliminar esta empresa: existem ${osLabel}. Remova ou altere a empresa nessas OS antes de eliminar.`,
+        HttpStatus.CONFLICT,
+      );
+    }
     await this.prisma.company.delete({ where: { id } });
     return { success: true };
   }

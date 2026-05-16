@@ -190,7 +190,7 @@ model Ticket {
   stageId          String
   stage            Stage        @relation(fields: [stageId], references: [id])
   companyId        String?
-  company          Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  company          Company?     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   marca            String?
   modelo           String?
   customerType     String?
