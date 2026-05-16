@@ -125,6 +125,52 @@ export class WhatsappService {
     }
   }
 
+  private isGroupRemoteJid(remoteJid: string): boolean {
+    return String(remoteJid || '').toLowerCase().endsWith('@g.us');
+  }
+
+  /** Chave do contacto na BD: JID completo para grupos; só dígitos para 1:1. */
+  private contactKeyFromRemoteJid(remoteJid: string): string {
+    if (this.isGroupRemoteJid(remoteJid)) return String(remoteJid).trim();
+    return String(remoteJid).split('@')[0];
+  }
+
+  /** Valor do campo `number` nos pedidos à Evolution (texto/mídia). */
+  private evolutionSendNumber(contactKey: string): string {
+    const k = String(contactKey || '').trim();
+    if (k.toLowerCase().endsWith('@g.us')) return k;
+    return k.replace(/\D/g, '');
+  }
+
+  private async tryFetchGroupSubject(instanceName: string, groupJid: string): Promise<string | undefined> {
+    try {
+      const { baseUrl, apiKey } = await this.getEvolutionCreds();
+      const inst = encodeURIComponent(instanceName);
+      const headers = { apikey: apiKey };
+      let res;
+      try {
+        res = await axios.get(`${baseUrl}/group/participants/${inst}`, {
+          params: { groupJid },
+          headers,
+        });
+      } catch {
+        res = await axios.post(
+          `${baseUrl}/group/participants/${inst}`,
+          { groupJid },
+          { headers: { ...headers, 'Content-Type': 'application/json' } },
+        );
+      }
+      const d = res.data;
+      if (d && typeof d === 'object') {
+        if (typeof d.subject === 'string' && d.subject.trim()) return d.subject.trim();
+        if (typeof d.groupSubject === 'string' && d.groupSubject.trim()) return d.groupSubject.trim();
+      }
+    } catch {
+      /* ignorar */
+    }
+    return undefined;
+  }
+
   async processWebhook(payload: any) {
     const allowedEvents = ['messages.upsert', 'messages.update', 'send.message'];
     
@@ -141,13 +187,24 @@ export class WhatsappService {
     if (!msgData || !msgData.key) return;
 
     const remoteJid = String(msgData.key.remoteJid || '');
-    if (!remoteJid || remoteJid.includes('@g.us') || remoteJid === 'status@broadcast') return;
+    if (!remoteJid || remoteJid === 'status@broadcast') return;
 
-    const contactNumber = remoteJid.split('@')[0];
+    const isGroupJid = this.isGroupRemoteJid(remoteJid);
+    const contactNumber = this.contactKeyFromRemoteJid(remoteJid);
     const isFromMe = Boolean(msgData.key.fromMe);
     const waId = msgData.key.id ? String(msgData.key.id) : undefined;
     const scopedWaId = waId ? this.buildScopedMessageId(userId, waId) : undefined;
+    const participantJid = msgData.key?.participant ? String(msgData.key.participant) : '';
     const pushName = msgData.pushName ? String(msgData.pushName) : contactNumber;
+    const groupSenderLabel =
+      isGroupJid && !isFromMe
+        ? (() => {
+            const byPush = String(pushName || '').trim();
+            if (byPush && byPush !== contactNumber) return byPush;
+            const tail = participantJid.split('@')[0];
+            return tail || undefined;
+          })()
+        : undefined;
 
     const msgExists = scopedWaId ? await this.prisma.message.findUnique({ where: { id: scopedWaId } }) : null;
 
@@ -213,29 +270,36 @@ export class WhatsappService {
           where: { number_userId: { number: contactNumber, userId } },
         });
         let picUrl = existingContact?.profilePictureUrl || undefined;
-        
+
         if (!picUrl) {
           picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
         }
 
         const finalSidebarText = text || fallbackSidebarText;
 
+        let newGroupResolvedName: string | undefined;
+        if (isGroupJid && !existingContact) {
+          const subject = await this.tryFetchGroupSubject(instanceName, remoteJid);
+          const short = contactNumber.replace(/\D/g, '').slice(-6);
+          newGroupResolvedName = subject || `Grupo (${short})`;
+        }
+
         await this.prisma.contact.upsert({
           where: { number_userId: { number: contactNumber, userId } },
-          update: { 
-            lastMessage: finalSidebarText, 
-            lastMessageTime: new Date(), 
-            instanceName, 
-            ...(picUrl && { profilePictureUrl: picUrl }) 
+          update: {
+            lastMessage: finalSidebarText,
+            lastMessageTime: new Date(),
+            instanceName,
+            ...(picUrl && { profilePictureUrl: picUrl }),
           },
-          create: { 
+          create: {
             userId,
-            number: contactNumber, 
-            name: pushName, 
-            lastMessage: finalSidebarText, 
-            instanceName, 
-            profilePictureUrl: picUrl || null 
-          }
+            number: contactNumber,
+            name: isGroupJid ? newGroupResolvedName ?? 'Grupo' : pushName || contactNumber,
+            lastMessage: finalSidebarText,
+            instanceName,
+            profilePictureUrl: picUrl || null,
+          },
         });
 
         // Em `send.message` (eco do nosso próprio envio) a linha é criada por sendMedia/sendText.
@@ -256,6 +320,7 @@ export class WhatsappService {
                 mediaData: mediaUrl || null,
                 mimeType: mimeType || null,
                 fileName: fileName || null,
+                groupSenderLabel: groupSenderLabel || null,
               },
             });
             if (!isFromMe && payload.event === 'messages.upsert') {
@@ -274,6 +339,9 @@ export class WhatsappService {
         if (picUrl) {
           msgData.profilePictureUrl = picUrl;
         }
+        if (groupSenderLabel) {
+          msgData.groupSenderLabel = groupSenderLabel;
+        }
 
         if (isMedia) {
           msgData.customMedia = { isMedia, mediaData: mediaUrl, mimeType, fileName, text };
@@ -283,10 +351,17 @@ export class WhatsappService {
       this.messageSubject.next({ ...payload, _crmUserId: userId });
 
       if (notifyInboundPush) {
+        const row = await this.prisma.contact.findUnique({
+          where: { number_userId: { number: contactNumber, userId } },
+          select: { name: true },
+        });
+        const title = row?.name?.trim() || (isGroupJid ? 'Grupo WhatsApp' : pushName);
+        const preview =
+          (isGroupJid && groupSenderLabel ? `${groupSenderLabel}: ` : '') + inboundPushPreview;
         void this.pushNotifications.notifyWhatsappInbound(userId, {
-          contactName: pushName,
+          contactName: title,
           contactNumber,
-          preview: inboundPushPreview,
+          preview,
         });
       }
     } catch (e) {
@@ -298,19 +373,24 @@ export class WhatsappService {
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
+    const contactKey = String(number ?? '').trim();
+    const evoNumber = this.evolutionSendNumber(contactKey);
+    if (!evoNumber) {
+      throw new HttpException('Número ou grupo inválido para envio.', HttpStatus.BAD_REQUEST);
+    }
     try {
       const { baseUrl, apiKey } = await this.getEvolutionCreds();
       const response = await axios.post(
         `${baseUrl}/message/sendText/${instanceName}`,
-        { number, text },
+        { number: evoNumber, text },
         { headers: { apikey: apiKey } }
       );
       const waId = response.data?.key?.id;
       
       await this.prisma.contact.upsert({
-        where: { number_userId: { number, userId } },
+        where: { number_userId: { number: contactKey, userId } },
         update: { lastMessage: text, lastMessageTime: new Date(), instanceName },
-        create: { number, userId, name: number, lastMessage: text, instanceName }
+        create: { number: contactKey, userId, name: contactKey, lastMessage: text, instanceName }
       });
 
       if (waId) {
@@ -320,7 +400,7 @@ export class WhatsappService {
               id: this.buildScopedMessageId(userId, String(waId)),
               userId,
               instanceName,
-              contactNumber: number,
+              contactNumber: contactKey,
               text,
               type: 'sent',
               timestamp: new Date(),
@@ -352,10 +432,9 @@ export class WhatsappService {
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
-    const cleanNumber = String(number ?? '')
-      .trim()
-      .replace(/\D/g, '');
-    if (!cleanNumber) {
+    const contactKey = String(number ?? '').trim();
+    const evoNumber = this.evolutionSendNumber(contactKey);
+    if (!evoNumber) {
       throw new HttpException(
         'Número do contato em falta ou inválido no pedido. Recarregue a conversa e tente novamente.',
         HttpStatus.BAD_REQUEST,
@@ -380,7 +459,7 @@ export class WhatsappService {
     const stableObjectId = `${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     let mediaUrl = '';
     try {
-      const mediaFolder = this.r2Service.conversasPath(userId, cleanNumber);
+      const mediaFolder = this.r2Service.conversasPath(userId, contactKey);
       mediaUrl = await this.r2Service.uploadBuffer(
         fileBuffer,
         fileOriginalName,
@@ -409,7 +488,7 @@ export class WhatsappService {
         axios.post(
           `${evoBaseUrl}/message/sendMedia/${instanceName}`,
           {
-            number: cleanNumber,
+            number: evoNumber,
             mediatype,
             mimetype: fileMimeType,
             caption: caption || '',
@@ -425,7 +504,7 @@ export class WhatsappService {
           response = await axios.post(
             `${evoBaseUrl}/message/sendWhatsAppAudio/${instanceName}`,
             {
-              number: cleanNumber,
+              number: evoNumber,
               audio: mediaUrl,
               encoding: true,
             },
@@ -453,9 +532,9 @@ export class WhatsappService {
       const waId = response.data?.key?.id || Date.now().toString();
 
       await this.prisma.contact.upsert({
-        where: { number_userId: { number: cleanNumber, userId } },
+        where: { number_userId: { number: contactKey, userId } },
         update: { lastMessage: caption || fallbackText, lastMessageTime: new Date(), instanceName },
-        create: { number: cleanNumber, userId, name: cleanNumber, lastMessage: caption || fallbackText, instanceName }
+        create: { number: contactKey, userId, name: contactKey, lastMessage: caption || fallbackText, instanceName }
       });
 
       const scopedId = this.buildScopedMessageId(userId, String(waId));
@@ -465,7 +544,7 @@ export class WhatsappService {
             id: scopedId,
             userId,
             instanceName,
-            contactNumber: cleanNumber,
+            contactNumber: contactKey,
             text: caption || '',
             type: 'sent',
             isMedia: true,
@@ -617,6 +696,82 @@ export class WhatsappService {
     }
   }
 
+  async createGroup(
+    userId: string,
+    body: { subject: string; participants: string[]; description?: string; instanceName?: string },
+  ) {
+    const subject = String(body.subject || '').trim();
+    if (!subject) {
+      throw new HttpException('Indique o nome do grupo.', HttpStatus.BAD_REQUEST);
+    }
+    if (subject.length > 25) {
+      throw new HttpException('O nome do grupo tem no máximo 25 caracteres no WhatsApp.', HttpStatus.BAD_REQUEST);
+    }
+    const participants = (Array.isArray(body.participants) ? body.participants : [])
+      .map((p) => String(p || '').replace(/\D/g, ''))
+      .filter((d) => d.length >= 10);
+    if (participants.length < 1) {
+      throw new HttpException(
+        'Indique pelo menos um número com WhatsApp (DDI + DDD + número, só dígitos) para criar o grupo.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const instanceName = body.instanceName?.trim() || (await this.getDefaultInstanceName(userId));
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+
+    const { baseUrl, apiKey } = await this.getEvolutionCreds();
+    const payload: Record<string, unknown> = { subject, participants };
+    const desc = String(body.description || '').trim();
+    if (desc) payload.description = desc;
+
+    let res;
+    try {
+      res = await axios.post(`${baseUrl}/group/create/${encodeURIComponent(instanceName)}`, payload, {
+        headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+      });
+    } catch (e: any) {
+      const detail =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        e?.message ||
+        'Falha ao criar grupo na Evolution.';
+      this.logger.warn(`createGroup Evolution: ${detail}`);
+      throw new HttpException(String(detail), HttpStatus.BAD_REQUEST);
+    }
+
+    const d = res.data || {};
+    const groupJid = d.jid || d.groupJid || d.key?.remoteJid || d.id;
+    const jid = groupJid ? String(groupJid).trim() : '';
+    if (!jid.toLowerCase().includes('@g.us')) {
+      this.logger.warn('createGroup resposta inesperada', d);
+      throw new HttpException(
+        'A Evolution não devolveu o identificador do grupo. Verifique a versão da API e os logs.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await this.prisma.contact.upsert({
+      where: { number_userId: { number: jid, userId } },
+      update: {
+        name: subject,
+        lastMessage: 'Grupo criado',
+        lastMessageTime: new Date(),
+        instanceName,
+      },
+      create: {
+        userId,
+        number: jid,
+        name: subject,
+        lastMessage: 'Grupo criado',
+        lastMessageTime: new Date(),
+        instanceName,
+      },
+    });
+
+    return { groupJid: jid, subject };
+  }
+
   async updateContact(userId: string, number: string, data: any) {
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined && data.name !== null) updateData.name = data.name;
@@ -678,7 +833,9 @@ export class WhatsappService {
   }
 
   private buildRemoteJid(contactNumber: string): string {
-    const digits = String(contactNumber).replace(/\D/g, '');
+    const k = String(contactNumber || '').trim();
+    if (k.toLowerCase().endsWith('@g.us')) return k;
+    const digits = k.replace(/\D/g, '');
     return `${digits}@s.whatsapp.net`;
   }
 
@@ -809,7 +966,7 @@ export class WhatsappService {
     await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
 
     const remoteJid = this.buildRemoteJid(dto.contactNumber);
-    const cleanNumber = String(dto.contactNumber).replace(/\D/g, '');
+    const evoNumber = this.evolutionSendNumber(dto.contactNumber);
     const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
     const evolutionHeaders = { apikey: evoApiKey, 'Content-Type': 'application/json' };
 
@@ -817,7 +974,7 @@ export class WhatsappService {
       await axios.post(
         `${evoBaseUrl}/chat/updateMessage/${encodeURIComponent(instanceName)}`,
         {
-          number: cleanNumber,
+          number: evoNumber,
           text,
           key: {
             remoteJid,

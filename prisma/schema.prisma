@@ -165,6 +165,8 @@ model Message {
   mediaData     String?  @db.Text
   mimeType      String?  
   fileName      String?
+  /// Em grupos (@g.us), nome do membro que enviou a mensagem recebida.
+  groupSenderLabel String? @db.Text
   timestamp     DateTime @default(now())
 }
 

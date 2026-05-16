@@ -97,6 +97,16 @@ export class WhatsappController {
     return this.whatsappService.deleteConversation(req.user.userId, number); 
   }
 
+  @Post('groups/create')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
+  async createGroup(
+    @Req() req: any,
+    @Body() body: { subject: string; participants: string[]; description?: string; instanceName?: string },
+  ) {
+    return this.whatsappService.createGroup(req.user.userId, body);
+  }
+
   @Post('send')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')
