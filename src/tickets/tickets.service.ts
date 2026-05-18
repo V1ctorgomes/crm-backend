@@ -243,7 +243,7 @@ export class TicketsService implements OnModuleInit {
   async deleteStage(userId: string, id: string, actor: AuditActor, rawReason?: string) {
     const stage = await this.prisma.stage.findFirst({
       where: { id, userId },
-      select: { id: true, name: true, color: true, order: true },
+      select: { id: true, userId: true, name: true, color: true, order: true, isActive: true },
     });
     if (!stage) {
       throw new HttpException('Fase não encontrada.', HttpStatus.NOT_FOUND);

@@ -291,6 +291,9 @@ model DeletionAudit {
   reason       String   @db.Text
   snapshot     Json?
   createdAt    DateTime @default(now())
+  /// Preenchido quando um administrador reverteu esta exclusão (dentro da janela permitida).
+  revertedAt       DateTime?
+  revertedByUserId String?
 
   @@index([actorUserId, createdAt])
   @@index([resourceType, createdAt])

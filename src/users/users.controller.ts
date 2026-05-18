@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards, UseInt
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { UsersService } from './users.service';
+import { DeletionRevertService } from '../deletion-audit/deletion-revert.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -13,7 +14,10 @@ function actorFromReq(req: { user: { userId: string; email: string; role: string
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly deletionRevertService: DeletionRevertService,
+  ) {}
 
   @Get('pending')
   @UseGuards(RolesGuard)
@@ -57,6 +61,21 @@ export class UsersController {
   @Get('me')
   findMe(@Req() req: any) {
     return this.usersService.findMe(req.user.userId);
+  }
+
+  /** Exclusões recentes por utilizadores de atendimento (para reversão pelo admin, até 24 h). */
+  @Get('deletion-audits/recent')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'DEVELOPER')
+  listUserDeletionAuditsForRevert() {
+    return this.deletionRevertService.listRecentUserDeletions();
+  }
+
+  @Post('deletion-audits/:auditId/revert')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'DEVELOPER')
+  revertUserDeletion(@Req() req: any, @Param('auditId') auditId: string) {
+    return this.deletionRevertService.revertUserDeletion(auditId, req.user.userId);
   }
 
   @Get(':id')
