@@ -3,8 +3,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeletionResourceType } from './deletion-audit.constants';
 
-/** Janela em que o admin pode reverter exclusões feitas por utilizadores de atendimento (USER). */
-export const USER_DELETION_REVERT_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Janela em que o admin pode reverter uma exclusão auditada (qualquer perfil que a tenha feito). */
+export const DELETION_REVERT_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** @deprecated Use DELETION_REVERT_WINDOW_MS */
+export const USER_DELETION_REVERT_WINDOW_MS = DELETION_REVERT_WINDOW_MS;
 
 const SUPPORTED_REVERT_TYPES = new Set<string>([
   DeletionResourceType.TICKET_NOTE,
@@ -37,19 +39,15 @@ export class DeletionRevertService {
   constructor(private readonly prisma: PrismaService) {}
 
   private withinRevertWindow(createdAt: Date): boolean {
-    return Date.now() - createdAt.getTime() <= USER_DELETION_REVERT_WINDOW_MS;
+    return Date.now() - createdAt.getTime() <= DELETION_REVERT_WINDOW_MS;
   }
 
   private revertBlockReason(row: {
-    actorRole: string;
     revertedAt: Date | null;
     createdAt: Date;
     snapshot: Prisma.JsonValue | null;
     resourceType: string;
   }): string | null {
-    if (row.actorRole !== 'USER') {
-      return 'Apenas exclusões feitas por utilizadores de atendimento podem ser revertidas aqui.';
-    }
     if (row.revertedAt) return 'Já foi restaurado.';
     if (!this.withinRevertWindow(row.createdAt)) {
       return 'Passou o prazo de 24 horas para restaurar.';
@@ -67,7 +65,6 @@ export class DeletionRevertService {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const rows = await this.prisma.deletionAudit.findMany({
       where: {
-        actorRole: 'USER',
         createdAt: { gte: since },
       },
       orderBy: { createdAt: 'desc' },
@@ -94,6 +91,7 @@ export class DeletionRevertService {
         createdAt: r.createdAt.toISOString(),
         actorUserId: r.actorUserId,
         actorEmail: r.actorEmail,
+        actorRole: r.actorRole,
         resourceType: r.resourceType,
         resourceId: r.resourceId,
         reason: r.reason,

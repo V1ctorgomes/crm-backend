@@ -63,7 +63,7 @@ export class UsersController {
     return this.usersService.findMe(req.user.userId);
   }
 
-  /** Exclusões recentes por utilizadores de atendimento (para reversão pelo admin, até 24 h). */
+  /** Exclusões auditadas recentes (atendimento, admin ou developer) — reversão pelo admin até 24 h. */
   @Get('deletion-audits/recent')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'DEVELOPER')
