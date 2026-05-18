@@ -107,6 +107,16 @@ export class WhatsappController {
     return this.whatsappService.createGroup(req.user.userId, body);
   }
 
+  @Post('groups/sync-profile')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
+  async syncGroupProfile(
+    @Req() req: any,
+    @Body() body: { number: string; instanceName?: string },
+  ) {
+    return this.whatsappService.syncGroupProfileFromWhatsApp(req.user.userId, body);
+  }
+
   @Post('send')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')

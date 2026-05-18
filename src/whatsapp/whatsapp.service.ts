@@ -129,10 +129,49 @@ export class WhatsappService {
     return String(remoteJid || '').toLowerCase().endsWith('@g.us');
   }
 
-  /** Chave do contacto na BD: JID completo para grupos; só dígitos para 1:1. */
+  /**
+   * Chave única na BD: JID do grupo sempre em minúsculas (evita duplicados @g.us vs @G.us);
+   * conversas 1:1 só com dígitos (parte antes do @).
+   */
+  private normalizeStoredContactKey(key: string): string {
+    const k = String(key || '').trim();
+    if (!k) return k;
+    if (k.toLowerCase().endsWith('@g.us')) return k.toLowerCase();
+    const beforeAt = k.split('@')[0] || k;
+    return beforeAt.replace(/\D/g, '');
+  }
+
+  /** Rejeita valores que são JID ou id numérico, não o nome legível do grupo. */
+  private sanitizeWhatsAppGroupSubject(candidate: string | undefined, groupJid: string): string | undefined {
+    const s = typeof candidate === 'string' ? candidate.trim() : '';
+    if (!s) return undefined;
+    const gj = String(groupJid || '').trim().toLowerCase();
+    if (s.toLowerCase() === gj) return undefined;
+    if (s.toLowerCase().endsWith('@g.us')) return undefined;
+    if (s.toLowerCase().includes('@s.whatsapp.net')) return undefined;
+    const onlyDigits = s.replace(/\D/g, '');
+    if (onlyDigits.length >= 14 && onlyDigits === s.replace(/[^\d]/g, '')) return undefined;
+    return s;
+  }
+
+  /** Nome claramente automático ou o próprio JID — tentamos obter o subject na Evolution. */
+  private shouldReplaceAutoGroupDisplayName(name: string | null | undefined, groupJid: string): boolean {
+    const n = String(name ?? '').trim();
+    if (!n) return true;
+    if (n.toLowerCase() === String(groupJid).trim().toLowerCase()) return true;
+    if (n.toLowerCase().includes('@g.us')) return true;
+    if (/^grupo\s*whatsapp\s*$/i.test(n)) return true;
+    if (/^grupo\s*\(\d+\)\s*$/i.test(n)) return true;
+    const digits = n.replace(/\D/g, '');
+    if (digits.length >= 14 && digits === n.replace(/[^\d]/g, '')) return true;
+    return false;
+  }
+
+  /** Chave do contacto na BD: JID completo (normalizado) para grupos; só dígitos para 1:1. */
   private contactKeyFromRemoteJid(remoteJid: string): string {
-    if (this.isGroupRemoteJid(remoteJid)) return String(remoteJid).trim();
-    return String(remoteJid).split('@')[0];
+    const raw = String(remoteJid || '').trim();
+    if (this.isGroupRemoteJid(raw)) return raw.toLowerCase();
+    return raw.split('@')[0].replace(/\D/g, '');
   }
 
   /** Valor do campo `number` nos pedidos à Evolution (texto/mídia). */
@@ -143,6 +182,7 @@ export class WhatsappService {
   }
 
   private async tryFetchGroupSubject(instanceName: string, groupJid: string): Promise<string | undefined> {
+    const gj = this.normalizeStoredContactKey(groupJid);
     try {
       const { baseUrl, apiKey } = await this.getEvolutionCreds();
       const inst = encodeURIComponent(instanceName);
@@ -150,20 +190,48 @@ export class WhatsappService {
       let res;
       try {
         res = await axios.get(`${baseUrl}/group/participants/${inst}`, {
-          params: { groupJid },
+          params: { groupJid: gj },
           headers,
         });
       } catch {
         res = await axios.post(
           `${baseUrl}/group/participants/${inst}`,
-          { groupJid },
+          { groupJid: gj },
           { headers: { ...headers, 'Content-Type': 'application/json' } },
         );
       }
       const d = res.data;
+      const candidates: unknown[] = [];
+      const push = (v: unknown) => {
+        if (v === undefined || v === null) return;
+        candidates.push(v);
+      };
       if (d && typeof d === 'object') {
-        if (typeof d.subject === 'string' && d.subject.trim()) return d.subject.trim();
-        if (typeof d.groupSubject === 'string' && d.groupSubject.trim()) return d.groupSubject.trim();
+        const o = d as Record<string, unknown>;
+        push(o.subject);
+        push(o.groupSubject);
+        push(o.groupName);
+        const data = o.data;
+        if (data && typeof data === 'object') {
+          const inner = data as Record<string, unknown>;
+          push(inner.subject);
+          push(inner.groupSubject);
+        }
+        const chat = o.chat;
+        if (chat && typeof chat === 'object') {
+          const c = chat as Record<string, unknown>;
+          push(c.subject);
+        }
+        const meta = o.groupMetadata;
+        if (meta && typeof meta === 'object') {
+          const m = meta as Record<string, unknown>;
+          push(m.subject);
+        }
+      }
+      for (const c of candidates) {
+        const raw = typeof c === 'string' ? c : String(c);
+        const sanitized = this.sanitizeWhatsAppGroupSubject(raw, gj);
+        if (sanitized) return sanitized;
       }
     } catch {
       /* ignorar */
@@ -277,12 +345,28 @@ export class WhatsappService {
 
         const finalSidebarText = text || fallbackSidebarText;
 
+        let fetchedGroupSubject: string | undefined;
+        if (
+          isGroupJid &&
+          (!existingContact ||
+            this.shouldReplaceAutoGroupDisplayName(existingContact?.name, contactNumber))
+        ) {
+          fetchedGroupSubject = await this.tryFetchGroupSubject(instanceName, contactNumber);
+        }
+
         let newGroupResolvedName: string | undefined;
         if (isGroupJid && !existingContact) {
-          const subject = await this.tryFetchGroupSubject(instanceName, remoteJid);
           const short = contactNumber.replace(/\D/g, '').slice(-6);
-          newGroupResolvedName = subject || `Grupo (${short})`;
+          newGroupResolvedName = fetchedGroupSubject || `Grupo (${short})`;
         }
+
+        const groupNameUpdate: Record<string, string> =
+          isGroupJid &&
+          existingContact &&
+          this.shouldReplaceAutoGroupDisplayName(existingContact.name, contactNumber) &&
+          fetchedGroupSubject
+            ? { name: fetchedGroupSubject }
+            : {};
 
         await this.prisma.contact.upsert({
           where: { number_userId: { number: contactNumber, userId } },
@@ -291,6 +375,7 @@ export class WhatsappService {
             lastMessageTime: new Date(),
             instanceName,
             ...(picUrl && { profilePictureUrl: picUrl }),
+            ...groupNameUpdate,
           },
           create: {
             userId,
@@ -373,7 +458,7 @@ export class WhatsappService {
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
-    const contactKey = String(number ?? '').trim();
+    const contactKey = this.normalizeStoredContactKey(String(number ?? '').trim());
     const evoNumber = this.evolutionSendNumber(contactKey);
     if (!evoNumber) {
       throw new HttpException('Número ou grupo inválido para envio.', HttpStatus.BAD_REQUEST);
@@ -386,11 +471,23 @@ export class WhatsappService {
         { headers: { apikey: apiKey } }
       );
       const waId = response.data?.key?.id;
-      
+
+      let createDisplayName: string | undefined;
+      if (this.isGroupRemoteJid(contactKey)) {
+        createDisplayName =
+          (await this.tryFetchGroupSubject(instanceName, contactKey)) || 'Grupo WhatsApp';
+      }
+
       await this.prisma.contact.upsert({
         where: { number_userId: { number: contactKey, userId } },
         update: { lastMessage: text, lastMessageTime: new Date(), instanceName },
-        create: { number: contactKey, userId, name: contactKey, lastMessage: text, instanceName }
+        create: {
+          number: contactKey,
+          userId,
+          name: createDisplayName ?? contactKey,
+          lastMessage: text,
+          instanceName,
+        },
       });
 
       if (waId) {
@@ -432,7 +529,7 @@ export class WhatsappService {
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
-    const contactKey = String(number ?? '').trim();
+    const contactKey = this.normalizeStoredContactKey(String(number ?? '').trim());
     const evoNumber = this.evolutionSendNumber(contactKey);
     if (!evoNumber) {
       throw new HttpException(
@@ -531,10 +628,22 @@ export class WhatsappService {
 
       const waId = response.data?.key?.id || Date.now().toString();
 
+      let createDisplayNameMedia: string | undefined;
+      if (this.isGroupRemoteJid(contactKey)) {
+        createDisplayNameMedia =
+          (await this.tryFetchGroupSubject(instanceName, contactKey)) || 'Grupo WhatsApp';
+      }
+
       await this.prisma.contact.upsert({
         where: { number_userId: { number: contactKey, userId } },
         update: { lastMessage: caption || fallbackText, lastMessageTime: new Date(), instanceName },
-        create: { number: contactKey, userId, name: contactKey, lastMessage: caption || fallbackText, instanceName }
+        create: {
+          number: contactKey,
+          userId,
+          name: createDisplayNameMedia ?? contactKey,
+          lastMessage: caption || fallbackText,
+          instanceName,
+        },
       });
 
       const scopedId = this.buildScopedMessageId(userId, String(waId));
@@ -628,6 +737,13 @@ export class WhatsappService {
     number: string,
     opts?: { limit?: number; beforeMessageId?: string },
   ) {
+    const contactNumber = this.normalizeStoredContactKey(String(number || '').trim());
+    const msgVariants = this.contactNumberLookupVariants(contactNumber);
+    const msgWhere =
+      msgVariants.length === 1
+        ? { userId, contactNumber }
+        : { userId, OR: msgVariants.map((cn) => ({ contactNumber: cn })) };
+
     const rawLimit = opts?.limit ?? 80;
     const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 80, 1), 200);
     const take = limit + 1;
@@ -636,7 +752,7 @@ export class WhatsappService {
     try {
       if (beforeId) {
         const cursor = await this.prisma.message.findFirst({
-          where: { userId, contactNumber: number, id: beforeId },
+          where: { ...msgWhere, id: beforeId },
           select: { id: true, timestamp: true },
         });
         if (!cursor) {
@@ -644,11 +760,14 @@ export class WhatsappService {
         }
         const older = await this.prisma.message.findMany({
           where: {
-            userId,
-            contactNumber: number,
-            OR: [
-              { timestamp: { lt: cursor.timestamp } },
-              { AND: [{ timestamp: cursor.timestamp }, { id: { lt: cursor.id } }] },
+            AND: [
+              msgWhere,
+              {
+                OR: [
+                  { timestamp: { lt: cursor.timestamp } },
+                  { AND: [{ timestamp: cursor.timestamp }, { id: { lt: cursor.id } }] },
+                ],
+              },
             ],
           },
           orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
@@ -660,7 +779,7 @@ export class WhatsappService {
       }
 
       const recent = await this.prisma.message.findMany({
-        where: { userId, contactNumber: number },
+        where: msgWhere,
         orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
         take,
       });
@@ -673,17 +792,23 @@ export class WhatsappService {
   }
 
   async deleteConversation(userId: string, number: string) {
+    const contactNumber = this.normalizeStoredContactKey(String(number || '').trim());
+    const msgVariants = this.contactNumberLookupVariants(contactNumber);
+    const msgWhere =
+      msgVariants.length === 1
+        ? { userId, contactNumber }
+        : { userId, OR: msgVariants.map((cn) => ({ contactNumber: cn })) };
     try {
-      const conversasPrefix = this.r2Service.conversasPath(userId, number);
+      const conversasPrefix = this.r2Service.conversasPath(userId, contactNumber);
       await this.r2Service.deleteFolder(conversasPrefix);
 
-      await this.prisma.message.deleteMany({ 
-        where: { userId, contactNumber: number } 
+      await this.prisma.message.deleteMany({
+        where: msgWhere,
       });
       
       try {
         await this.prisma.contact.update({ 
-          where: { number_userId: { number, userId } }, 
+          where: { number_userId: { number: contactNumber, userId } }, 
           data: { lastMessage: '', lastMessageTime: null } 
         });
       } catch (updateErr) {
@@ -741,8 +866,9 @@ export class WhatsappService {
     }
 
     const d = res.data || {};
-    const groupJid = d.jid || d.groupJid || d.key?.remoteJid || d.id;
-    const jid = groupJid ? String(groupJid).trim() : '';
+    const jidRaw = d.jid || d.groupJid || d.key?.remoteJid || d.id;
+    const jidNorm = jidRaw ? String(jidRaw).trim() : '';
+    const jid = jidNorm ? this.normalizeStoredContactKey(jidNorm) : '';
     if (!jid.toLowerCase().includes('@g.us')) {
       this.logger.warn('createGroup resposta inesperada', d);
       throw new HttpException(
@@ -772,7 +898,70 @@ export class WhatsappService {
     return { groupJid: jid, subject };
   }
 
+  /**
+   * Obtém foto (e, se o nome ainda for automático/JID, o subject) do grupo na Evolution e grava no contacto.
+   */
+  async syncGroupProfileFromWhatsApp(
+    userId: string,
+    body: { number: string; instanceName?: string },
+  ) {
+    const contactKey = this.normalizeStoredContactKey(String(body.number || '').trim());
+    if (!this.isGroupRemoteJid(contactKey)) {
+      throw new HttpException(
+        'Só é possível sincronizar foto/nome para grupos WhatsApp (@g.us).',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const instanceName = body.instanceName?.trim() || (await this.getDefaultInstanceName(userId));
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+
+    const existing = await this.prisma.contact.findUnique({
+      where: { number_userId: { number: contactKey, userId } },
+    });
+    if (!existing) {
+      throw new HttpException(
+        'Contato de grupo não encontrado. Abra a conversa ou aguarde uma mensagem.',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const [picUrl, subjectFromApi] = await Promise.all([
+      this.fetchProfilePicture(contactKey, instanceName),
+      this.tryFetchGroupSubject(instanceName, contactKey),
+    ]);
+
+    const data: { profilePictureUrl?: string | null; name?: string } = {};
+    if (picUrl) data.profilePictureUrl = picUrl;
+    if (
+      subjectFromApi &&
+      this.shouldReplaceAutoGroupDisplayName(existing.name, contactKey)
+    ) {
+      data.name = subjectFromApi;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return {
+        number: existing.number,
+        name: existing.name,
+        profilePictureUrl: existing.profilePictureUrl,
+        updated: false as const,
+      };
+    }
+
+    const updated = await this.prisma.contact.update({
+      where: { number_userId: { number: contactKey, userId } },
+      data,
+    });
+    return {
+      number: updated.number,
+      name: updated.name,
+      profilePictureUrl: updated.profilePictureUrl,
+      updated: true as const,
+    };
+  }
+
   async updateContact(userId: string, number: string, data: any) {
+    const contactKey = this.normalizeStoredContactKey(String(number || '').trim());
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined && data.name !== null) updateData.name = data.name;
     if (data.email !== undefined) updateData.email = data.email;
@@ -785,18 +974,19 @@ export class WhatsappService {
     }
     if (Object.keys(updateData).length === 0) {
       return await this.prisma.contact.findUniqueOrThrow({
-        where: { number_userId: { number, userId } },
+        where: { number_userId: { number: contactKey, userId } },
       });
     }
     return await this.prisma.contact.update({
-      where: { number_userId: { number, userId } },
+      where: { number_userId: { number: contactKey, userId } },
       data: updateData as any,
     });
   }
 
   async removeContact(userId: string, number: string) {
+    const contactKey = this.normalizeStoredContactKey(String(number || '').trim());
     const contact = await this.prisma.contact.findUnique({
-      where: { number_userId: { number, userId } },
+      where: { number_userId: { number: contactKey, userId } },
       include: { tickets: true }
     });
 
@@ -812,7 +1002,7 @@ export class WhatsappService {
     }
 
     return await this.prisma.contact.delete({
-      where: { number_userId: { number, userId } },
+      where: { number_userId: { number: contactKey, userId } },
     });
   }
 
@@ -822,26 +1012,47 @@ export class WhatsappService {
     return null;
   }
 
+  /** Variantes da chave do contacto para encontrar mensagens antigas (ex.: @G.us vs @g.us). */
+  private contactNumberLookupVariants(contactNumber: string): string[] {
+    const k = String(contactNumber || '').trim();
+    if (!k.toLowerCase().endsWith('@g.us')) {
+      return [this.normalizeStoredContactKey(k)];
+    }
+    const lower = k.toLowerCase();
+    return [...new Set([lower, k, lower.replace(/@g\.us$/, '@G.us')])];
+  }
+
   /** UI/SSE podem enviar só o id WA; na BD a chave é `userId:waId`. */
   private async findUserMessageForAction(userId: string, contactNumber: string, messageId: string) {
     const ids = messageId.includes(':')
       ? [messageId]
       : [messageId, this.buildScopedMessageId(userId, messageId)];
+    const variants = this.contactNumberLookupVariants(contactNumber);
     return this.prisma.message.findFirst({
-      where: { userId, contactNumber, id: { in: ids } },
+      where: {
+        userId,
+        id: { in: ids },
+        OR: variants.map((cn) => ({ contactNumber: cn })),
+      },
     });
   }
 
   private buildRemoteJid(contactNumber: string): string {
     const k = String(contactNumber || '').trim();
-    if (k.toLowerCase().endsWith('@g.us')) return k;
+    if (k.toLowerCase().endsWith('@g.us')) return k.toLowerCase();
     const digits = k.replace(/\D/g, '');
     return `${digits}@s.whatsapp.net`;
   }
 
   private async refreshContactLastMessage(userId: string, contactNumber: string) {
+    const variants = this.contactNumberLookupVariants(contactNumber);
+    const canonical = this.normalizeStoredContactKey(contactNumber);
+    const msgWhere =
+      variants.length === 1
+        ? { userId, contactNumber: variants[0] }
+        : { userId, OR: variants.map((cn) => ({ contactNumber: cn })) };
     const last = await this.prisma.message.findFirst({
-      where: { userId, contactNumber },
+      where: msgWhere,
       orderBy: { timestamp: 'desc' },
     });
     const preview =
@@ -850,7 +1061,7 @@ export class WhatsappService {
       '';
     try {
       await this.prisma.contact.update({
-        where: { number_userId: { number: contactNumber, userId } },
+        where: { number_userId: { number: canonical, userId } },
         data: {
           lastMessage: preview,
           lastMessageTime: last?.timestamp ?? null,
@@ -869,7 +1080,8 @@ export class WhatsappService {
     userId: string,
     dto: { contactNumber: string; messageId: string; instanceName?: string },
   ) {
-    const msg = await this.findUserMessageForAction(userId, dto.contactNumber, dto.messageId);
+    const contactNumber = this.normalizeStoredContactKey(String(dto.contactNumber || '').trim());
+    const msg = await this.findUserMessageForAction(userId, contactNumber, dto.messageId);
     if (!msg) throw new HttpException('Mensagem não encontrada.', HttpStatus.NOT_FOUND);
     if (msg.type !== 'sent') {
       throw new HttpException('Só pode apagar mensagens enviadas por si.', HttpStatus.BAD_REQUEST);
@@ -895,7 +1107,7 @@ export class WhatsappService {
       dto.instanceName || msg.instanceName || (await this.getDefaultInstanceName(userId));
     await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
 
-    const remoteJid = this.buildRemoteJid(dto.contactNumber);
+    const remoteJid = this.buildRemoteJid(contactNumber);
     const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
     const evolutionHeaders = { apikey: evoApiKey, 'Content-Type': 'application/json' };
 
@@ -922,7 +1134,7 @@ export class WhatsappService {
     }
 
     await this.prisma.message.delete({ where: { id: msg.id } });
-    await this.refreshContactLastMessage(userId, dto.contactNumber);
+    await this.refreshContactLastMessage(userId, contactNumber);
     return { success: true };
   }
 
@@ -936,7 +1148,8 @@ export class WhatsappService {
     const text = String(dto.text ?? '').trim();
     if (!text) throw new HttpException('Texto inválido.', HttpStatus.BAD_REQUEST);
 
-    const msg = await this.findUserMessageForAction(userId, dto.contactNumber, dto.messageId);
+    const contactNumber = this.normalizeStoredContactKey(String(dto.contactNumber || '').trim());
+    const msg = await this.findUserMessageForAction(userId, contactNumber, dto.messageId);
     if (!msg) throw new HttpException('Mensagem não encontrada.', HttpStatus.NOT_FOUND);
     if (msg.type !== 'sent') {
       throw new HttpException('Só pode editar mensagens enviadas por si.', HttpStatus.BAD_REQUEST);
@@ -965,8 +1178,8 @@ export class WhatsappService {
       dto.instanceName || msg.instanceName || (await this.getDefaultInstanceName(userId));
     await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
 
-    const remoteJid = this.buildRemoteJid(dto.contactNumber);
-    const evoNumber = this.evolutionSendNumber(dto.contactNumber);
+    const remoteJid = this.buildRemoteJid(contactNumber);
+    const evoNumber = this.evolutionSendNumber(contactNumber);
     const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
     const evolutionHeaders = { apikey: evoApiKey, 'Content-Type': 'application/json' };
 
@@ -1000,7 +1213,7 @@ export class WhatsappService {
       where: { id: msg.id },
       data: { text },
     });
-    await this.refreshContactLastMessage(userId, dto.contactNumber);
+    await this.refreshContactLastMessage(userId, contactNumber);
     return { success: true };
   }
 }
