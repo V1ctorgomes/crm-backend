@@ -181,62 +181,154 @@ export class WhatsappService {
     return k.replace(/\D/g, '');
   }
 
-  private async tryFetchGroupSubject(instanceName: string, groupJid: string): Promise<string | undefined> {
-    const gj = this.normalizeStoredContactKey(groupJid);
-    try {
-      const { baseUrl, apiKey } = await this.getEvolutionCreds();
-      const inst = encodeURIComponent(instanceName);
-      const headers = { apikey: apiKey };
-      let res;
-      try {
-        res = await axios.get(`${baseUrl}/group/participants/${inst}`, {
-          params: { groupJid: gj },
-          headers,
-        });
-      } catch {
-        res = await axios.post(
-          `${baseUrl}/group/participants/${inst}`,
-          { groupJid: gj },
-          { headers: { ...headers, 'Content-Type': 'application/json' } },
-        );
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /** Percorre JSON da Evolution à procura de campos `subject` (metadados de grupo). */
+  private collectGroupSubjectStringsFromTree(obj: unknown, maxDepth = 8, depth = 0): string[] {
+    if (depth > maxDepth || obj == null) return [];
+    if (typeof obj === 'string') return [];
+    if (Array.isArray(obj)) {
+      const acc: string[] = [];
+      for (const item of obj) acc.push(...this.collectGroupSubjectStringsFromTree(item, maxDepth, depth + 1));
+      return acc;
+    }
+    if (typeof obj !== 'object') return [];
+    const out: string[] = [];
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (k === 'subject' && typeof v === 'string') out.push(v);
+      else if (v && (typeof v === 'object' || Array.isArray(v))) {
+        out.push(...this.collectGroupSubjectStringsFromTree(v, maxDepth, depth + 1));
       }
-      const d = res.data;
-      const candidates: unknown[] = [];
-      const push = (v: unknown) => {
-        if (v === undefined || v === null) return;
-        candidates.push(v);
-      };
-      if (d && typeof d === 'object') {
-        const o = d as Record<string, unknown>;
-        push(o.subject);
-        push(o.groupSubject);
-        push(o.groupName);
+    }
+    return out;
+  }
+
+  private pickSanitizedGroupSubject(gj: string, ...buckets: unknown[]): string | undefined {
+    const seen = new Set<string>();
+    for (const b of buckets) {
+      const fromTree = this.collectGroupSubjectStringsFromTree(b);
+      const flat: unknown[] = [];
+      if (b && typeof b === 'object' && !Array.isArray(b)) {
+        const o = b as Record<string, unknown>;
+        flat.push(o.subject, o.groupSubject, o.groupName);
         const data = o.data;
         if (data && typeof data === 'object') {
           const inner = data as Record<string, unknown>;
-          push(inner.subject);
-          push(inner.groupSubject);
+          flat.push(inner.subject, inner.groupSubject);
         }
         const chat = o.chat;
         if (chat && typeof chat === 'object') {
-          const c = chat as Record<string, unknown>;
-          push(c.subject);
+          flat.push((chat as Record<string, unknown>).subject);
         }
         const meta = o.groupMetadata;
         if (meta && typeof meta === 'object') {
-          const m = meta as Record<string, unknown>;
-          push(m.subject);
+          flat.push((meta as Record<string, unknown>).subject);
         }
       }
-      for (const c of candidates) {
-        const raw = typeof c === 'string' ? c : String(c);
-        const sanitized = this.sanitizeWhatsAppGroupSubject(raw, gj);
-        if (sanitized) return sanitized;
+      for (const raw of [...flat, ...fromTree]) {
+        if (raw === undefined || raw === null) continue;
+        const s = typeof raw === 'string' ? raw : String(raw);
+        const sanitized = this.sanitizeWhatsAppGroupSubject(s, gj);
+        if (sanitized && !seen.has(sanitized.toLowerCase())) {
+          seen.add(sanitized.toLowerCase());
+          return sanitized;
+        }
       }
-    } catch {
-      /* ignorar */
     }
     return undefined;
+  }
+
+  /** Uma ronda: `findGroupInfos` (Evolution) + fallback `participants`. */
+  private async tryFetchGroupSubjectOnce(instanceName: string, groupJid: string): Promise<string | undefined> {
+    const gj = this.normalizeStoredContactKey(groupJid);
+    const { baseUrl, apiKey } = await this.getEvolutionCreds();
+    const inst = encodeURIComponent(instanceName);
+    const headers = { apikey: apiKey };
+
+    const tryAxios = async (fn: () => Promise<{ data: unknown }>) => {
+      try {
+        return await fn();
+      } catch {
+        return null;
+      }
+    };
+
+    const findRes = await tryAxios(() =>
+      axios.get(`${baseUrl}/group/findGroupInfos/${inst}`, {
+        params: { groupJid: gj },
+        headers,
+      }),
+    );
+    if (findRes?.data) {
+      const picked = this.pickSanitizedGroupSubject(gj, findRes.data);
+      if (picked) return picked;
+    }
+
+    let partRes: { data: unknown } | null = null;
+    partRes = await tryAxios(() =>
+      axios.get(`${baseUrl}/group/participants/${inst}`, {
+        params: { groupJid: gj },
+        headers,
+      }),
+    );
+    if (!partRes) {
+      partRes = await tryAxios(() =>
+        axios.post(
+          `${baseUrl}/group/participants/${inst}`,
+          { groupJid: gj },
+          { headers: { ...headers, 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
+    if (partRes?.data) {
+      const picked = this.pickSanitizedGroupSubject(gj, partRes.data);
+      if (picked) return picked;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Subject do grupo na Evolution. Com `retries` > 0, volta a tentar (útil quando o grupo acaba de ser criado no telemóvel e a API ainda não tem metadados).
+   */
+  private async tryFetchGroupSubject(
+    instanceName: string,
+    groupJid: string,
+    opts?: { retries?: number },
+  ): Promise<string | undefined> {
+    const retries = Math.min(Math.max(Number(opts?.retries ?? 0), 0), 4);
+    const delayMs = 750;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      if (attempt > 0) await this.sleep(delayMs);
+      const got = await this.tryFetchGroupSubjectOnce(instanceName, groupJid);
+      if (got) return got;
+    }
+    return undefined;
+  }
+
+  /** Se o nome ainda for placeholder (ex.: `Grupo (708883)`), tenta de novo o subject (Evolution por vezes atrasa após criar o grupo no telemóvel). */
+  private async retryResolveGroupSubjectIfPlaceholder(
+    userId: string,
+    instanceName: string,
+    groupJid: string,
+  ) {
+    try {
+      const row = await this.prisma.contact.findUnique({
+        where: { number_userId: { number: groupJid, userId } },
+        select: { name: true },
+      });
+      if (!this.shouldReplaceAutoGroupDisplayName(row?.name, groupJid)) return;
+      const sub = await this.tryFetchGroupSubject(instanceName, groupJid, { retries: 3 });
+      if (!sub) return;
+      await this.prisma.contact.update({
+        where: { number_userId: { number: groupJid, userId } },
+        data: { name: sub },
+      });
+    } catch (e) {
+      this.logger.warn(`retryResolveGroupSubjectIfPlaceholder ${groupJid}`, e);
+    }
   }
 
   async processWebhook(payload: any) {
@@ -345,13 +437,16 @@ export class WhatsappService {
 
         const finalSidebarText = text || fallbackSidebarText;
 
-        let fetchedGroupSubject: string | undefined;
-        if (
+        const needsGroupSubject =
           isGroupJid &&
           (!existingContact ||
-            this.shouldReplaceAutoGroupDisplayName(existingContact?.name, contactNumber))
-        ) {
-          fetchedGroupSubject = await this.tryFetchGroupSubject(instanceName, contactNumber);
+            this.shouldReplaceAutoGroupDisplayName(existingContact?.name, contactNumber));
+
+        let fetchedGroupSubject: string | undefined;
+        if (needsGroupSubject) {
+          fetchedGroupSubject = await this.tryFetchGroupSubject(instanceName, contactNumber, {
+            retries: 3,
+          });
         }
 
         let newGroupResolvedName: string | undefined;
@@ -386,6 +481,13 @@ export class WhatsappService {
             profilePictureUrl: picUrl || null,
           },
         });
+
+        if (needsGroupSubject && !fetchedGroupSubject) {
+          const inst = instanceName;
+          const cn = contactNumber;
+          const uid = userId;
+          setTimeout(() => void this.retryResolveGroupSubjectIfPlaceholder(uid, inst, cn), 5000);
+        }
 
         // Em `send.message` (eco do nosso próprio envio) a linha é criada por sendMedia/sendText.
         // Tentar criar aqui de novo causaria P2002 ou (pior) sobrescrever com mediaData=null.
@@ -475,7 +577,7 @@ export class WhatsappService {
       let createDisplayName: string | undefined;
       if (this.isGroupRemoteJid(contactKey)) {
         createDisplayName =
-          (await this.tryFetchGroupSubject(instanceName, contactKey)) || 'Grupo WhatsApp';
+          (await this.tryFetchGroupSubject(instanceName, contactKey, { retries: 1 })) || 'Grupo WhatsApp';
       }
 
       await this.prisma.contact.upsert({
@@ -631,7 +733,7 @@ export class WhatsappService {
       let createDisplayNameMedia: string | undefined;
       if (this.isGroupRemoteJid(contactKey)) {
         createDisplayNameMedia =
-          (await this.tryFetchGroupSubject(instanceName, contactKey)) || 'Grupo WhatsApp';
+          (await this.tryFetchGroupSubject(instanceName, contactKey, { retries: 1 })) || 'Grupo WhatsApp';
       }
 
       await this.prisma.contact.upsert({
@@ -927,7 +1029,7 @@ export class WhatsappService {
 
     const [picUrl, subjectFromApi] = await Promise.all([
       this.fetchProfilePicture(contactKey, instanceName),
-      this.tryFetchGroupSubject(instanceName, contactKey),
+      this.tryFetchGroupSubject(instanceName, contactKey, { retries: 2 }),
     ]);
 
     const data: { profilePictureUrl?: string | null; name?: string } = {};
