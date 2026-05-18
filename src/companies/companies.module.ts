@@ -4,9 +4,10 @@ import { BrasilApiCnpjService } from './brasilapi-cnpj.service';
 import { CompaniesController } from './companies.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { DeletionAuditModule } from '../deletion-audit/deletion-audit.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, DeletionAuditModule],
   controllers: [CompaniesController],
   providers: [CompaniesService, BrasilApiCnpjService],
   exports: [CompaniesService],

@@ -279,3 +279,21 @@ model TicketCatalogItem {
   @@index([category, isActive])
   @@map("ticket_catalog_items")
 }
+
+/// Auditoria de eliminações: quem, quando, motivo e snapshot JSON para suportar consulta admin e reversão futura.
+model DeletionAudit {
+  id           String   @id @default(uuid())
+  actorUserId  String
+  actorEmail   String
+  actorRole    String
+  resourceType String
+  resourceId   String
+  reason       String   @db.Text
+  snapshot     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([resourceType, createdAt])
+  @@index([resourceType, resourceId])
+  @@map("deletion_audits")
+}

@@ -4,6 +4,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+function actorFromReq(req: { user: { userId: string; email: string; role: string } }) {
+  return { userId: req.user.userId, email: req.user.email, role: req.user.role };
+}
+
 @Controller('instances')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'USER')
@@ -32,7 +36,7 @@ export class InstancesController {
   }
 
   @Delete(':name')
-  remove(@Req() req: any, @Param('name') name: string) {
-    return this.instancesService.remove(req.user.userId, name);
+  remove(@Req() req: any, @Param('name') name: string, @Body() body?: { reason?: string }) {
+    return this.instancesService.remove(req.user.userId, name, actorFromReq(req), body?.reason);
   }
 }

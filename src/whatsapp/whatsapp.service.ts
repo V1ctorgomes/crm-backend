@@ -5,6 +5,9 @@ import { Subject } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from './r2.service';
 import { PushNotificationsService } from '../notifications/push-notifications.service';
+import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
+import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
+import type { AuditActor } from '../deletion-audit/delete-reason.util';
 
 @Injectable()
 export class WhatsappService {
@@ -45,6 +48,7 @@ export class WhatsappService {
     private prisma: PrismaService,
     private r2Service: R2Service,
     private pushNotifications: PushNotificationsService,
+    private deletionAudit: DeletionAuditService,
   ) {}
 
   private async getDefaultInstanceName(userId: string): Promise<string> {
@@ -893,7 +897,7 @@ export class WhatsappService {
     }
   }
 
-  async deleteConversation(userId: string, number: string) {
+  async deleteConversation(userId: string, number: string, actor: AuditActor, rawReason?: string) {
     const contactNumber = this.normalizeStoredContactKey(String(number || '').trim());
     const msgVariants = this.contactNumberLookupVariants(contactNumber);
     const msgWhere =
@@ -904,18 +908,39 @@ export class WhatsappService {
       const conversasPrefix = this.r2Service.conversasPath(userId, contactNumber);
       await this.r2Service.deleteFolder(conversasPrefix);
 
-      await this.prisma.message.deleteMany({
-        where: msgWhere,
+      const messageCount = await this.prisma.message.count({ where: msgWhere });
+      const contactRow = await this.prisma.contact.findUnique({
+        where: { number_userId: { number: contactNumber, userId } },
+        select: {
+          number: true,
+          name: true,
+          instanceName: true,
+          lastMessage: true,
+          lastMessageTime: true,
+        },
       });
-      
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.message.deleteMany({
+          where: msgWhere,
+        });
+        await this.deletionAudit.record(tx, actor, {
+          resourceType: DeletionResourceType.WHATSAPP_CONVERSATION,
+          resourceId: contactNumber,
+          rawReason,
+          snapshot: { contactNumber, messagesRemoved: messageCount, contact: contactRow },
+        });
+      });
+
       try {
-        await this.prisma.contact.update({ 
-          where: { number_userId: { number: contactNumber, userId } }, 
-          data: { lastMessage: '', lastMessageTime: null } 
+        await this.prisma.contact.update({
+          where: { number_userId: { number: contactNumber, userId } },
+          data: { lastMessage: '', lastMessageTime: null },
         });
       } catch (updateErr) {
+        /* contacto pode não existir */
       }
-      
+
       return { success: true };
     } catch (e) {
       this.logger.error('Erro ao excluir conversa', e);
@@ -1085,11 +1110,11 @@ export class WhatsappService {
     });
   }
 
-  async removeContact(userId: string, number: string) {
+  async removeContact(userId: string, number: string, actor: AuditActor, rawReason?: string) {
     const contactKey = this.normalizeStoredContactKey(String(number || '').trim());
     const contact = await this.prisma.contact.findUnique({
       where: { number_userId: { number: contactKey, userId } },
-      include: { tickets: true }
+      include: { tickets: true },
     });
 
     if (!contact) {
@@ -1098,14 +1123,25 @@ export class WhatsappService {
 
     if (contact.tickets && contact.tickets.length > 0) {
       throw new HttpException(
-        'Este contato possui solicitações (OS) no Kanban e não pode ser excluído.', 
-        HttpStatus.BAD_REQUEST
+        'Este contato possui solicitações (OS) no Kanban e não pode ser excluído.',
+        HttpStatus.BAD_REQUEST,
       );
     }
 
-    return await this.prisma.contact.delete({
-      where: { number_userId: { number: contactKey, userId } },
+    const snapshot = { ...contact, tickets: (contact.tickets || []).map((t) => ({ id: t.id })) };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.contact.delete({
+        where: { number_userId: { number: contactKey, userId } },
+      });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.CONTACT,
+        resourceId: contactKey,
+        rawReason,
+        snapshot,
+      });
     });
+    return { success: true };
   }
 
   private extractWaMessageId(userId: string, storedMessageId: string): string | null {
@@ -1180,7 +1216,8 @@ export class WhatsappService {
    */
   async deleteMessageForEveryone(
     userId: string,
-    dto: { contactNumber: string; messageId: string; instanceName?: string },
+    dto: { contactNumber: string; messageId: string; instanceName?: string; reason?: string },
+    actor: AuditActor,
   ) {
     const contactNumber = this.normalizeStoredContactKey(String(dto.contactNumber || '').trim());
     const msg = await this.findUserMessageForAction(userId, contactNumber, dto.messageId);
@@ -1235,7 +1272,15 @@ export class WhatsappService {
       throw new HttpException(detail || 'Erro ao apagar mensagem na Evolution.', HttpStatus.BAD_REQUEST);
     }
 
-    await this.prisma.message.delete({ where: { id: msg.id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.message.delete({ where: { id: msg.id } });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.WHATSAPP_MESSAGE,
+        resourceId: String(msg.id),
+        rawReason: dto.reason,
+        snapshot: msg,
+      });
+    });
     await this.refreshContactLastMessage(userId, contactNumber);
     return { success: true };
   }

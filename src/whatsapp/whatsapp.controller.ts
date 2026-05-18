@@ -25,6 +25,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+function actorFromReq(req: { user: { userId: string; email: string; role: string } }) {
+  return { userId: req.user.userId, email: req.user.email, role: req.user.role };
+}
+
 @Controller('whatsapp')
 export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}
@@ -93,8 +97,8 @@ export class WhatsappController {
   @Delete('history/:number')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')
-  async deleteConversation(@Req() req: any, @Param('number') number: string) { 
-    return this.whatsappService.deleteConversation(req.user.userId, number); 
+  async deleteConversation(@Req() req: any, @Param('number') number: string, @Body() body?: { reason?: string }) {
+    return this.whatsappService.deleteConversation(req.user.userId, number, actorFromReq(req), body?.reason);
   }
 
   @Post('groups/create')
@@ -129,9 +133,9 @@ export class WhatsappController {
   @Roles('ADMIN', 'USER')
   async deleteMessageForEveryone(
     @Req() req: any,
-    @Body() body: { contactNumber: string; messageId: string; instanceName?: string },
+    @Body() body: { contactNumber: string; messageId: string; instanceName?: string; reason?: string },
   ) {
-    return this.whatsappService.deleteMessageForEveryone(req.user.userId, body);
+    return this.whatsappService.deleteMessageForEveryone(req.user.userId, body, actorFromReq(req));
   }
 
   @Post('messages/update-text')
@@ -171,7 +175,7 @@ export class WhatsappController {
   @Delete('contacts/:number')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')
-  async removeContact(@Req() req: any, @Param('number') number: string) {
-    return this.whatsappService.removeContact(req.user.userId, number);
+  async removeContact(@Req() req: any, @Param('number') number: string, @Body() body?: { reason?: string }) {
+    return this.whatsappService.removeContact(req.user.userId, number, actorFromReq(req), body?.reason);
   }
 }

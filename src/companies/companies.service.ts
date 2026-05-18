@@ -6,10 +6,16 @@ import {
   onlyDigits,
   sanitizeAndAssertCompany,
 } from './companies.validation';
+import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
+import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
+import type { AuditActor } from '../deletion-audit/delete-reason.util';
 
 @Injectable()
 export class CompaniesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private deletionAudit: DeletionAuditService,
+  ) {}
 
   private mapCompany<T extends { id: string; legalName: string; tradeName: string | null; cnpj: string }>(c: T) {
     return c;
@@ -113,7 +119,7 @@ export class CompaniesService {
     }
   }
 
-  async remove(userId: string, id: string) {
+  async remove(userId: string, id: string, actor: AuditActor, rawReason?: string) {
     const existing = await this.prisma.company.findFirst({ where: { id, userId } });
     if (!existing) throw new HttpException('Empresa não encontrada.', HttpStatus.NOT_FOUND);
     const osCount = await this.prisma.ticket.count({
@@ -126,7 +132,15 @@ export class CompaniesService {
         HttpStatus.CONFLICT,
       );
     }
-    await this.prisma.company.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.company.delete({ where: { id } });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.COMPANY,
+        resourceId: id,
+        rawReason,
+        snapshot: existing,
+      });
+    });
     return { success: true };
   }
 
@@ -156,10 +170,25 @@ export class CompaniesService {
     return { success: true };
   }
 
-  async unlinkContact(userId: string, companyId: string, number: string) {
+  async unlinkContact(userId: string, companyId: string, number: string, actor: AuditActor, rawReason?: string) {
     const contactNumber = String(number || '').trim();
-    await this.prisma.contactCompany.deleteMany({
+    const link = await this.prisma.contactCompany.findFirst({
       where: { userId, companyId, contactNumber },
+      include: {
+        company: { select: { id: true, legalName: true, cnpj: true } },
+        contact: { select: { number: true, name: true } },
+      },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.contactCompany.deleteMany({
+        where: { userId, companyId, contactNumber },
+      });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.CONTACT_COMPANY_LINK,
+        resourceId: `${companyId}:${contactNumber}`,
+        rawReason,
+        snapshot: link || { userId, companyId, contactNumber },
+      });
     });
     return { success: true };
   }

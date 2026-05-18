@@ -6,6 +6,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+function actorFromReq(req: { user: { userId: string; email: string; role: string } }) {
+  return { userId: req.user.userId, email: req.user.email, role: req.user.role };
+}
+
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
@@ -82,7 +86,7 @@ export class UsersController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'DEVELOPER')
-  delete(@Req() req: any, @Param('id') id: string) {
-    return this.usersService.delete(req.user.userId, req.user.role, id);
+  delete(@Req() req: any, @Param('id') id: string, @Body() body?: { reason?: string }) {
+    return this.usersService.delete(req.user.userId, req.user.role, id, actorFromReq(req), body?.reason);
   }
 }

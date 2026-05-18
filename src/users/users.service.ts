@@ -2,6 +2,9 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
 import * as bcrypt from 'bcrypt';
+import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
+import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
+import type { AuditActor } from '../deletion-audit/delete-reason.util';
 
 function canManageAllUsers(role: string): boolean {
   return role === 'ADMIN' || role === 'DEVELOPER';
@@ -9,7 +12,11 @@ function canManageAllUsers(role: string): boolean {
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private r2Service: R2Service) {}
+  constructor(
+    private prisma: PrismaService,
+    private r2Service: R2Service,
+    private deletionAudit: DeletionAuditService,
+  ) {}
 
   async findAll(actorUserId: string, actorRole: string) {
     const publicSelect = {
@@ -231,13 +238,37 @@ export class UsersService {
     return user;
   }
 
-  async delete(actorUserId: string, actorRole: string, id: string) {
+  async delete(actorUserId: string, actorRole: string, id: string, actor: AuditActor, rawReason?: string) {
     if (!canManageAllUsers(actorRole)) {
       throw new ForbiddenException('Apenas administradores ou developers podem remover usuarios.');
     }
     if (actorUserId === id) {
       throw new ForbiddenException('Não pode remover a sua própria conta neste ecrã.');
     }
-    return this.prisma.user.delete({ where: { id } });
+    const victim = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        profilePictureUrl: true,
+        approved: true,
+        createdAt: true,
+      },
+    });
+    if (!victim) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.delete({ where: { id } });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.USER,
+        resourceId: id,
+        rawReason,
+        snapshot: victim,
+      });
+    });
+    return { success: true };
   }
 }

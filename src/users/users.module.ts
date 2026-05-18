@@ -4,9 +4,10 @@ import { UsersController } from './users.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { R2Service } from '../whatsapp/r2.service';
 import { AuthModule } from '../auth/auth.module';
+import { DeletionAuditModule } from '../deletion-audit/deletion-audit.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, DeletionAuditModule],
   controllers: [UsersController],
   providers: [UsersService, R2Service], // Adicionado o R2Service aqui
   exports: [UsersService],

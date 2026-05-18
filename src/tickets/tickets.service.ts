@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
 import { sanitizeAndAssertCreateTicket, sanitizeAndAssertUpdateTicket } from './ticket-create.validation';
 import { TicketCatalogService } from '../ticket-catalog/ticket-catalog.service';
+import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
+import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
+import type { AuditActor } from '../deletion-audit/delete-reason.util';
 
 @Injectable()
 export class TicketsService implements OnModuleInit {
@@ -11,6 +14,7 @@ export class TicketsService implements OnModuleInit {
     private prisma: PrismaService,
     private r2Service: R2Service,
     private ticketCatalog: TicketCatalogService,
+    private deletionAudit: DeletionAuditService,
   ) {}
 
   async onModuleInit() {
@@ -143,21 +147,52 @@ export class TicketsService implements OnModuleInit {
     });
   }
 
-  async deleteTicketFile(userId: string, fileId: string) {
+  async deleteTicketFile(userId: string, fileId: string, actor: AuditActor, rawReason?: string) {
     const file = await this.prisma.ticketFile.findFirst({
       where: { id: fileId, ticket: { userId } },
+      include: { ticket: { select: { id: true, contactNumber: true } } },
     });
     if (file) {
-       await this.r2Service.deleteFile(file.fileUrl);
-       await this.prisma.ticketFile.delete({ where: { id: fileId } });
+      await this.r2Service.deleteFile(file.fileUrl);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.ticketFile.delete({ where: { id: fileId } });
+        await this.deletionAudit.record(tx, actor, {
+          resourceType: DeletionResourceType.TICKET_FILE,
+          resourceId: fileId,
+          rawReason,
+          snapshot: file,
+        });
+      });
     }
     return { success: true };
   }
 
-  async deleteTicket(userId: string, id: string) {
-    await this.ensureTicketOwner(userId, id);
+  async deleteTicket(userId: string, id: string, actor: AuditActor, rawReason?: string) {
+    const full = await this.prisma.ticket.findFirst({
+      where: { id, userId },
+      include: {
+        contact: { select: { number: true, name: true } },
+        company: { select: { id: true, legalName: true, cnpj: true } },
+        stage: { select: { id: true, name: true } },
+        notes: true,
+        tasks: true,
+        files: true,
+      },
+    });
+    if (!full) {
+      throw new HttpException('Solicitação não encontrada.', HttpStatus.NOT_FOUND);
+    }
     await this.r2Service.deleteFolder(this.r2Service.solicitacoesTicketPath(userId, id));
-    return this.prisma.ticket.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.ticket.delete({ where: { id } });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.TICKET,
+        resourceId: id,
+        rawReason,
+        snapshot: full,
+      });
+    });
+    return { success: true };
   }
 
   async getTicketByContact(userId: string, contactNumber: string) {
@@ -205,10 +240,10 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.stage.update({ where: { id }, data });
   }
 
-  async deleteStage(userId: string, id: string) {
+  async deleteStage(userId: string, id: string, actor: AuditActor, rawReason?: string) {
     const stage = await this.prisma.stage.findFirst({
       where: { id, userId },
-      select: { id: true },
+      select: { id: true, name: true, color: true, order: true },
     });
     if (!stage) {
       throw new HttpException('Fase não encontrada.', HttpStatus.NOT_FOUND);
@@ -244,7 +279,14 @@ export class TicketsService implements OnModuleInit {
             data: { stageId: fallback.id },
           });
         }
-        return tx.stage.delete({ where: { id } });
+        const deleted = await tx.stage.delete({ where: { id } });
+        await this.deletionAudit.record(tx, actor, {
+          resourceType: DeletionResourceType.TICKET_STAGE,
+          resourceId: id,
+          rawReason,
+          snapshot: stage,
+        });
+        return deleted;
       });
     } catch (e) {
       if (e instanceof HttpException) throw e;
@@ -466,10 +508,19 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.note.create({ data: { ticketId, text } });
   }
 
-  async deleteNote(userId: string, id: string) {
+  async deleteNote(userId: string, id: string, actor: AuditActor, rawReason?: string) {
     const note = await this.prisma.note.findFirst({ where: { id, ticket: { userId } } });
     if (!note) throw new HttpException('Nota não encontrada.', HttpStatus.NOT_FOUND);
-    return this.prisma.note.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.note.delete({ where: { id } });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.TICKET_NOTE,
+        resourceId: id,
+        rawReason,
+        snapshot: note,
+      });
+    });
+    return { success: true };
   }
 
   async addTask(userId: string, ticketId: string, title: string, dueDate: string) {
@@ -489,9 +540,18 @@ export class TicketsService implements OnModuleInit {
     return this.prisma.task.update({ where: { id }, data: { isCompleted } });
   }
 
-  async deleteTask(userId: string, id: string) {
+  async deleteTask(userId: string, id: string, actor: AuditActor, rawReason?: string) {
     const task = await this.prisma.task.findFirst({ where: { id, ticket: { userId } } });
     if (!task) throw new HttpException('Tarefa não encontrada.', HttpStatus.NOT_FOUND);
-    return this.prisma.task.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.task.delete({ where: { id } });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.TICKET_TASK,
+        resourceId: id,
+        rawReason,
+        snapshot: task,
+      });
+    });
+    return { success: true };
   }
 }

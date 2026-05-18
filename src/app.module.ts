@@ -17,7 +17,7 @@ import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
-    PrismaModule, 
+    PrismaModule,
     CustomersModule, 
     AuthModule, 
     NotificationsModule,

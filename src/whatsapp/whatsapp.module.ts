@@ -5,9 +5,10 @@ import { R2Service } from './r2.service'; // Necessário injetar aqui
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DeletionAuditModule } from '../deletion-audit/deletion-audit.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, NotificationsModule],
+  imports: [PrismaModule, AuthModule, NotificationsModule, DeletionAuditModule],
   controllers: [WhatsappController],
   providers: [WhatsappService, R2Service], // Adicionado o R2Service
   exports: [WhatsappService],

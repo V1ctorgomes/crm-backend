@@ -16,6 +16,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+function actorFromReq(req: { user: { userId: string; email: string; role: string } }) {
+  return { userId: req.user.userId, email: req.user.email, role: req.user.role };
+}
+
 @Controller('companies')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'USER')
@@ -61,8 +65,8 @@ export class CompaniesController {
   }
 
   @Delete(':id')
-  remove(@Req() req: any, @Param('id') id: string) {
-    return this.service.remove(req.user.userId, id);
+  remove(@Req() req: any, @Param('id') id: string, @Body() body?: { reason?: string }) {
+    return this.service.remove(req.user.userId, id, actorFromReq(req), body?.reason);
   }
 
   @Post(':id/contacts/:number')
@@ -71,7 +75,7 @@ export class CompaniesController {
   }
 
   @Delete(':id/contacts/:number')
-  unlink(@Req() req: any, @Param('id') id: string, @Param('number') number: string) {
-    return this.service.unlinkContact(req.user.userId, id, number);
+  unlink(@Req() req: any, @Param('id') id: string, @Param('number') number: string, @Body() body?: { reason?: string }) {
+    return this.service.unlinkContact(req.user.userId, id, number, actorFromReq(req), body?.reason);
   }
 }

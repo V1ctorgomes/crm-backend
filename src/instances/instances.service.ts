@@ -1,6 +1,9 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import axios from 'axios';
+import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
+import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
+import type { AuditActor } from '../deletion-audit/delete-reason.util';
 
 @Injectable()
 export class InstancesService {
@@ -19,7 +22,10 @@ export class InstancesService {
     return `${base}${sep}token=${encodeURIComponent(secret)}`;
   }
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private deletionAudit: DeletionAuditService,
+  ) {}
 
   // Função auxiliar para buscar as credenciais da Evolution diretamente da Base de Dados
   private async getEvolutionCredentials() {
@@ -190,14 +196,26 @@ export class InstancesService {
     }
   }
 
-  async remove(userId: string, instanceName: string) {
-    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+  async remove(userId: string, instanceName: string, actor: AuditActor, rawReason?: string) {
+    const inst = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+    if (!inst) {
+      throw new HttpException('Instância não encontrada.', HttpStatus.NOT_FOUND);
+    }
     try { 
       const { evoUrl, evoKey } = await this.getEvolutionCredentials();
       await axios.delete(`${evoUrl}/instance/delete/${instanceName}`, { headers: { apikey: evoKey } }); 
     } catch (e) {
       this.logger.warn(`Instância ${instanceName} não pôde ser apagada na Evolution (Pode já não existir).`);
     }
-    return this.prisma.instance.delete({ where: { name: instanceName } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.instance.delete({ where: { name: instanceName } });
+      await this.deletionAudit.record(tx, actor, {
+        resourceType: DeletionResourceType.INSTANCE,
+        resourceId: instanceName,
+        rawReason,
+        snapshot: inst,
+      });
+    });
+    return { success: true };
   }
 }

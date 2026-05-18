@@ -6,6 +6,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+function actorFromReq(req: { user: { userId: string; email: string; role: string } }) {
+  return { userId: req.user.userId, email: req.user.email, role: req.user.role };
+}
+
 @Controller('tickets')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'USER')
@@ -45,8 +49,8 @@ export class TicketsController {
   }
 
   @Delete('stages/:id')
-  deleteStage(@Req() req: any, @Param('id') id: string) {
-    return this.ticketsService.deleteStage(req.user.userId, id);
+  deleteStage(@Req() req: any, @Param('id') id: string, @Body() body?: { reason?: string }) {
+    return this.ticketsService.deleteStage(req.user.userId, id, actorFromReq(req), body?.reason);
   }
 
   @Post()
@@ -71,8 +75,8 @@ export class TicketsController {
   }
 
   @Delete('files/:fileId')
-  deleteTicketFile(@Req() req: any, @Param('fileId') fileId: string) {
-    return this.ticketsService.deleteTicketFile(req.user.userId, fileId);
+  deleteTicketFile(@Req() req: any, @Param('fileId') fileId: string, @Body() body?: { reason?: string }) {
+    return this.ticketsService.deleteTicketFile(req.user.userId, fileId, actorFromReq(req), body?.reason);
   }
 
   @Put(':id/stage')
@@ -97,8 +101,8 @@ export class TicketsController {
   }
 
   @Delete('notes/:id')
-  deleteNote(@Req() req: any, @Param('id') id: string) {
-    return this.ticketsService.deleteNote(req.user.userId, id);
+  deleteNote(@Req() req: any, @Param('id') id: string, @Body() body?: { reason?: string }) {
+    return this.ticketsService.deleteNote(req.user.userId, id, actorFromReq(req), body?.reason);
   }
 
   // ================= ROTAS DE TAREFAS / FOLLOW-UPS =================
@@ -113,13 +117,13 @@ export class TicketsController {
   }
 
   @Delete('tasks/:taskId')
-  deleteTask(@Req() req: any, @Param('taskId') taskId: string) {
-    return this.ticketsService.deleteTask(req.user.userId, taskId);
+  deleteTask(@Req() req: any, @Param('taskId') taskId: string, @Body() body?: { reason?: string }) {
+    return this.ticketsService.deleteTask(req.user.userId, taskId, actorFromReq(req), body?.reason);
   }
 
   /** Por último: evita que `DELETE /tickets/:id` roube `DELETE /tickets/stages/:id` em alguns ambientes. */
   @Delete(':id')
-  deleteTicket(@Req() req: any, @Param('id') id: string) {
-    return this.ticketsService.deleteTicket(req.user.userId, id);
+  deleteTicket(@Req() req: any, @Param('id') id: string, @Body() body?: { reason?: string }) {
+    return this.ticketsService.deleteTicket(req.user.userId, id, actorFromReq(req), body?.reason);
   }
 }
