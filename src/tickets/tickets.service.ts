@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../whatsapp/r2.service';
 import { sanitizeAndAssertCreateTicket, sanitizeAndAssertUpdateTicket } from './ticket-create.validation';
+import { assertResolutionReasonWhenArchiving } from './ticket-resolution.validation';
 import { TicketCatalogService } from '../ticket-catalog/ticket-catalog.service';
 import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
 import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
@@ -490,11 +491,12 @@ export class TicketsService implements OnModuleInit {
 
   async toggleArchiveTicket(userId: string, ticketId: string, isArchived: boolean, resolution?: string, resolutionReason?: string) {
     await this.ensureTicketOwner(userId, ticketId);
+    const sanitizedReason = assertResolutionReasonWhenArchiving(isArchived, resolution, resolutionReason);
     const dataToUpdate: any = { isArchived };
 
     if (isArchived) {
       if (resolution) dataToUpdate.resolution = resolution;
-      if (resolutionReason !== undefined) dataToUpdate.resolutionReason = resolutionReason;
+      if (sanitizedReason !== undefined) dataToUpdate.resolutionReason = sanitizedReason;
     } else {
       dataToUpdate.resolution = null;
       dataToUpdate.resolutionReason = null;
