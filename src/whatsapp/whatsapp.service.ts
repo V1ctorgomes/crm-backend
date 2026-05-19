@@ -16,10 +16,18 @@ import {
 } from '../common/text-bounds';
 import { sanitizeContactUpdate } from './contact-update.validation';
 import {
-  computeTypingDelayMs,
   isTypingDelayEnabled,
-  sleepMs,
+  PRESENCE_PULSE_MS,
+  type ChatPresenceType,
 } from './whatsapp-typing.util';
+import { WhatsappSendQueueService } from './whatsapp-send-queue.service';
+import { WhatsappInstanceHealthService } from './whatsapp-instance-health.service';
+import type { InstanceHealthSnapshot } from './whatsapp-instance-health.service';
+import { evolutionErrorDetail } from './whatsapp-evolution-error.util';
+import {
+  isWhatsAppNumberCheckEnabled,
+  parseWhatsAppExistsResult,
+} from './whatsapp-number-check.util';
 
 @Injectable()
 export class WhatsappService {
@@ -61,7 +69,18 @@ export class WhatsappService {
     private r2Service: R2Service,
     private pushNotifications: PushNotificationsService,
     private deletionAudit: DeletionAuditService,
+    private sendQueue: WhatsappSendQueueService,
+    private instanceHealth: WhatsappInstanceHealthService,
   ) {}
+
+  async getInstancesHealthForUser(userId: string): Promise<InstanceHealthSnapshot[]> {
+    const instances = await this.prisma.instance.findMany({
+      where: { userId },
+      select: { name: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return instances.map((i) => this.instanceHealth.getSnapshot(i.name));
+  }
 
   private async getDefaultInstanceName(userId: string): Promise<string> {
     const inst = await this.prisma.instance.findFirst({ where: { status: 'connected', userId } });
@@ -195,6 +214,67 @@ export class WhatsappService {
     const k = String(contactKey || '').trim();
     if (k.toLowerCase().endsWith('@g.us')) return k;
     return k.replace(/\D/g, '');
+  }
+
+  /**
+   * No 1.º envio para o contacto (sem histórico no CRM), confirma na Evolution que o número tem WhatsApp.
+   */
+  private async assertWhatsAppRecipientBeforeFirstOutbound(
+    userId: string,
+    contactKey: string,
+    instanceName: string,
+    phoneDigits: string,
+  ): Promise<void> {
+    if (!isWhatsAppNumberCheckEnabled()) return;
+    if (this.isGroupRemoteJid(contactKey)) return;
+    const digits = phoneDigits.replace(/\D/g, '');
+    if (digits.length < 10) {
+      throw new HttpException('Número inválido para envio.', HttpStatus.BAD_REQUEST);
+    }
+
+    const variants = this.contactNumberLookupVariants(contactKey);
+    const [priorSent, priorReceived] = await Promise.all([
+      this.prisma.message.count({
+        where: { userId, contactNumber: { in: variants }, type: 'sent' },
+      }),
+      this.prisma.message.count({
+        where: { userId, contactNumber: { in: variants }, type: 'received' },
+      }),
+    ]);
+    if (priorSent > 0 || priorReceived > 0) return;
+
+    const { baseUrl, apiKey } = await this.getEvolutionCreds();
+    let data: unknown;
+    try {
+      const res = await axios.post(
+        `${baseUrl}/chat/whatsappNumbers/${encodeURIComponent(instanceName)}`,
+        { numbers: [digits] },
+        {
+          headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+          timeout: 20_000,
+        },
+      );
+      data = res.data;
+    } catch (e) {
+      this.logger.warn(
+        `whatsappNumbers falhou (${instanceName}, ${digits}): ${evolutionErrorDetail(e)}`,
+      );
+      throw new HttpException(
+        'Não foi possível verificar se o número tem WhatsApp. Tente novamente em instantes.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const exists = parseWhatsAppExistsResult(data, digits);
+    if (exists === false) {
+      throw new HttpException(
+        'Este número não está registado no WhatsApp. Confira DDI + DDD + número.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (exists === null) {
+      this.logger.warn(`whatsappNumbers resposta inesperada (${instanceName}): ${JSON.stringify(data)}`);
+    }
   }
 
   private sleep(ms: number): Promise<void> {
@@ -348,13 +428,30 @@ export class WhatsappService {
   }
 
   async processWebhook(payload: any) {
-    const allowedEvents = ['messages.upsert', 'messages.update', 'send.message'];
-    
-    if (!payload || !payload.event || !allowedEvents.includes(String(payload.event)) || !payload.data) {
+    if (!payload || !payload.event) {
       return;
     }
 
     const instanceName = String(payload.instance || '');
+    const eventName = String(payload.event);
+
+    if (eventName === 'connection.update') {
+      if (instanceName) {
+        const data = payload.data;
+        const state =
+          (data && typeof data === 'object' && (data as Record<string, unknown>).state) ||
+          (data && typeof data === 'object' && (data as Record<string, unknown>).status) ||
+          payload.state;
+        this.instanceHealth.recordConnectionUpdate(instanceName, String(state ?? 'unknown'));
+      }
+      return;
+    }
+
+    const allowedEvents = ['messages.upsert', 'messages.update', 'send.message'];
+
+    if (!allowedEvents.includes(eventName) || !payload.data) {
+      return;
+    }
     const userId = await this.getUserIdFromInstance(instanceName);
     if (!userId) return;
     const payloadData = payload.data;
@@ -579,35 +676,51 @@ export class WhatsappService {
   }
 
   /**
-   * Mostra «digitando...» no WhatsApp do contacto antes do envio (Evolution sendPresence).
+   * Envia presença «digitando…» ou «a gravar…» enquanto o atendente escreve (Evolution sendPresence).
+   * Chamado pelo frontend em tempo real, não no momento do envio.
    */
-  private async emitComposingThenWait(
-    instanceName: string,
-    evoNumber: string,
-    textForEstimate: string,
-  ): Promise<void> {
-    if (!isTypingDelayEnabled()) return;
-    const delayMs = computeTypingDelayMs(textForEstimate);
+  async sendChatPresence(
+    userId: string,
+    number: string,
+    presence: ChatPresenceType,
+    requestedInstanceName?: string,
+  ): Promise<{ ok: true }> {
+    if (!isTypingDelayEnabled()) {
+      return { ok: true };
+    }
+    if (presence !== 'composing' && presence !== 'recording') {
+      throw new HttpException('Presença inválida.', HttpStatus.BAD_REQUEST);
+    }
+    const instanceName = requestedInstanceName || (await this.getDefaultInstanceName(userId));
+    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+    if (!ownedInstance) {
+      throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
+    }
+    const contactKey = this.normalizeStoredContactKey(String(number ?? '').trim());
+    const evoNumber = this.evolutionSendNumber(contactKey);
+    if (!evoNumber) {
+      throw new HttpException('Número ou grupo inválido.', HttpStatus.BAD_REQUEST);
+    }
     try {
       const { baseUrl, apiKey } = await this.getEvolutionCreds();
       await axios.post(
         `${baseUrl}/chat/sendPresence/${encodeURIComponent(instanceName)}`,
         {
           number: evoNumber,
-          delay: delayMs,
-          presence: 'composing',
+          delay: PRESENCE_PULSE_MS,
+          presence,
         },
         {
           headers: { apikey: apiKey, 'Content-Type': 'application/json' },
-          timeout: 20_000,
+          timeout: 15_000,
         },
       );
     } catch (e) {
       this.logger.warn(
-        `sendPresence (composing) falhou (${instanceName}): ${(e as Error)?.message ?? e}`,
+        `sendPresence (${presence}) falhou (${instanceName}): ${(e as Error)?.message ?? e}`,
       );
     }
-    await sleepMs(delayMs);
+    return { ok: true };
   }
 
   async sendText(userId: string, number: string, text: string, requestedInstanceName?: string) {
@@ -620,14 +733,17 @@ export class WhatsappService {
     if (!evoNumber) {
       throw new HttpException('Número ou grupo inválido para envio.', HttpStatus.BAD_REQUEST);
     }
+    await this.assertWhatsAppRecipientBeforeFirstOutbound(userId, contactKey, instanceName, evoNumber);
     try {
-      await this.emitComposingThenWait(instanceName, evoNumber, safeText);
       const { baseUrl, apiKey } = await this.getEvolutionCreds();
-      const response = await axios.post(
-        `${baseUrl}/message/sendText/${instanceName}`,
-        { number: evoNumber, text: safeText },
-        { headers: { apikey: apiKey } }
+      const response = await this.sendQueue.runForInstance(instanceName, () =>
+        axios.post(
+          `${baseUrl}/message/sendText/${instanceName}`,
+          { number: evoNumber, text: safeText },
+          { headers: { apikey: apiKey } },
+        ),
       );
+      this.instanceHealth.recordSendSuccess(instanceName);
       const waId = response.data?.key?.id;
 
       let createDisplayName: string | undefined;
@@ -670,16 +786,16 @@ export class WhatsappService {
         data: response.data,
         messageId: waId ? this.buildScopedMessageId(userId, String(waId)) : undefined,
       };
-    } catch (e: any) {
-      const detail =
-        e?.response?.data?.message ||
-        e?.response?.data?.error ||
-        (Array.isArray(e?.response?.data?.message)
-          ? e.response.data.message.map((m: any) => m?.message || JSON.stringify(m)).join(', ')
-          : null) ||
-        e?.message;
+    } catch (e: unknown) {
+      this.instanceHealth.recordSendFailure(instanceName);
+      const detail = evolutionErrorDetail(e);
       this.logger.error(`Evolution sendText falhou (${instanceName}): ${detail}`);
-      throw new HttpException(detail || 'Erro ao enviar pela Evolution.', HttpStatus.BAD_REQUEST);
+      if (e instanceof HttpException) throw e;
+      const status =
+        e && typeof e === 'object' && 'response' in e && (e as { response?: { status?: number } }).response?.status === 429
+          ? HttpStatus.TOO_MANY_REQUESTS
+          : HttpStatus.BAD_REQUEST;
+      throw new HttpException(detail || 'Erro ao enviar pela Evolution.', status);
     }
   }
 
@@ -697,6 +813,7 @@ export class WhatsappService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    await this.assertWhatsAppRecipientBeforeFirstOutbound(userId, contactKey, instanceName, evoNumber);
 
     let fileBuffer: Buffer | undefined = file?.buffer;
     if (!fileBuffer && file?.path) {
@@ -739,52 +856,60 @@ export class WhatsappService {
     const evolutionHeaders = { apikey: evoApiKey };
 
     try {
-      let response;
-
-      const postSendMedia = async (mediatype: 'document' | 'audio' | 'image' | 'video') =>
-        axios.post(
-          `${evoBaseUrl}/message/sendMedia/${instanceName}`,
-          {
-            number: evoNumber,
-          mediatype, 
-          mimetype: fileMimeType, 
-            caption: safeCaption,
-          media: mediaUrl, 
-            fileName: fileOriginalName,
-          },
-          { headers: evolutionHeaders },
-        );
-
-      // Gravações do browser vêm em WebM/Opus; `sendWhatsAppAudio` + encoding transcodifica para nota de voz (PTT).
-      if (fileMimeType.startsWith('audio/')) {
-        try {
-          response = await axios.post(
-            `${evoBaseUrl}/message/sendWhatsAppAudio/${instanceName}`,
+      const response = await this.sendQueue.runForInstance(instanceName, async () => {
+        const postSendMedia = async (media: 'document' | 'audio' | 'image' | 'video') =>
+          axios.post(
+            `${evoBaseUrl}/message/sendMedia/${instanceName}`,
             {
               number: evoNumber,
-              audio: mediaUrl,
-              encoding: true,
+              mediatype: media,
+              mimetype: fileMimeType,
+              caption: safeCaption,
+              media: mediaUrl,
+              fileName: fileOriginalName,
             },
             { headers: evolutionHeaders },
           );
-        } catch (audioErr: any) {
-          this.logger.warn(
-            `sendWhatsAppAudio falhou (${audioErr?.response?.status}), a tentar sendMedia como áudio`,
-            audioErr?.response?.data || audioErr?.message,
-          );
+
+        if (fileMimeType.startsWith('audio/')) {
           try {
-            response = await postSendMedia('audio');
-          } catch (audioMediaErr: any) {
-            this.logger.warn(
-              `sendMedia mediatype=audio falhou (${audioMediaErr?.response?.status}), fallback documento`,
-              audioMediaErr?.response?.data || audioMediaErr?.message,
+            return await axios.post(
+              `${evoBaseUrl}/message/sendWhatsAppAudio/${instanceName}`,
+              {
+                number: evoNumber,
+                audio: mediaUrl,
+                encoding: true,
+              },
+              { headers: evolutionHeaders },
             );
-            response = await postSendMedia('document');
+          } catch (audioErr: unknown) {
+            const status =
+              audioErr && typeof audioErr === 'object' && 'response' in audioErr
+                ? (audioErr as { response?: { status?: number } }).response?.status
+                : undefined;
+            this.logger.warn(
+              `sendWhatsAppAudio falhou (${status}), a tentar sendMedia como áudio`,
+              audioErr,
+            );
+            try {
+              return await postSendMedia('audio');
+            } catch (audioMediaErr: unknown) {
+              const status2 =
+                audioMediaErr && typeof audioMediaErr === 'object' && 'response' in audioMediaErr
+                  ? (audioMediaErr as { response?: { status?: number } }).response?.status
+                  : undefined;
+              this.logger.warn(
+                `sendMedia mediatype=audio falhou (${status2}), fallback documento`,
+                audioMediaErr,
+              );
+              return await postSendMedia('document');
+            }
           }
         }
-      } else {
-        response = await postSendMedia(mediatype as 'document' | 'image' | 'video');
-      }
+        return postSendMedia(mediatype as 'document' | 'image' | 'video');
+      });
+
+      this.instanceHealth.recordSendSuccess(instanceName);
 
       const waId = response.data?.key?.id || Date.now().toString();
 
@@ -840,14 +965,10 @@ export class WhatsappService {
         fileName: fileOriginalName,
         isMedia: true,
       };
-    } catch (error: any) {
-      const detail =
-        error?.response?.data?.message ||
-        error?.response?.data?.error ||
-        (Array.isArray(error?.response?.data?.message)
-          ? error.response.data.message.map((m: any) => m?.message || JSON.stringify(m)).join(', ')
-          : null) ||
-        error?.message;
+    } catch (error: unknown) {
+      this.instanceHealth.recordSendFailure(instanceName);
+      if (error instanceof HttpException) throw error;
+      const detail = evolutionErrorDetail(error);
       this.logger.error(`Evolution sendMedia falhou (${instanceName}): ${detail}`);
       let userMessage = detail || 'Falha ao enviar arquivo pela Evolution.';
       const hint =

@@ -21,6 +21,7 @@ import { Observable } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { assertWebhookAuthorized } from '../common/webhook-auth';
 import { assertCrmUpload } from '../common/upload-media.validation';
@@ -120,11 +121,36 @@ export class WhatsappController {
     return this.whatsappService.syncGroupProfileFromWhatsApp(req.user.userId, body);
   }
 
+  @Get('instances-health')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
+  async getInstancesHealth(@Req() req: any) {
+    return this.whatsappService.getInstancesHealthForUser(req.user.userId);
+  }
+
   @Post('send')
+  @Throttle({ default: { limit: 40, ttl: 60_000 } })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')
   async sendMessage(@Req() req: any, @Body() body: { number: string; text: string; instanceName?: string }) { 
     return this.whatsappService.sendText(req.user.userId, body.number, body.text, body.instanceName); 
+  }
+
+  /** Presença em tempo real enquanto o atendente digita ou grava áudio. */
+  @Post('presence')
+  @Throttle({ default: { limit: 45, ttl: 60_000 } })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'USER')
+  async sendPresence(
+    @Req() req: any,
+    @Body() body: { number: string; presence: 'composing' | 'recording'; instanceName?: string },
+  ) {
+    return this.whatsappService.sendChatPresence(
+      req.user.userId,
+      body.number,
+      body.presence,
+      body.instanceName,
+    );
   }
 
   @Post('messages/delete-for-everyone')
@@ -148,6 +174,7 @@ export class WhatsappController {
   }
 
   @Post('send-media')
+  @Throttle({ default: { limit: 40, ttl: 60_000 } })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'USER')
   @UseInterceptors(

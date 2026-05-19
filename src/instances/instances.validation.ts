@@ -17,6 +17,11 @@ export function sanitizeInstanceCreate(data: Record<string, unknown>) {
   const name = sanitizeInstanceName(data.name);
   const proxyHost = data.proxyHost != null ? String(data.proxyHost).trim() : '';
   const proxyPort = data.proxyPort != null ? String(data.proxyPort).trim() : '';
+  if (!proxyHost || !proxyPort) {
+    throw new BadRequestException(
+      'É obrigatório associar uma proxy à instância WhatsApp. Configure uma em Developer → Proxies.',
+    );
+  }
   const proxyProto = String(data.proxyProto ?? 'http').toLowerCase();
   if (proxyProto !== 'http' && proxyProto !== 'https' && proxyProto !== 'socks5') {
     throw new BadRequestException('Protocolo de proxy inválido.');
