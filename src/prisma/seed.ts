@@ -5,6 +5,11 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('Seed bloqueado em produção (contém palavras-passe de exemplo).');
+    process.exit(1);
+  }
+
   const password = await bcrypt.hash('123456', 10);
   
   await prisma.user.upsert({

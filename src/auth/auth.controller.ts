@@ -2,6 +2,10 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Res } from '@
 import type { Response } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
+import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
+import { clearCsrfCookie, setCsrfCookie } from '../config/csrf';
 
 /** Rotas públicas de autenticação — limite mais baixo que a API geral. */
 const AUTH_THROTTLE = { default: { limit: 15, ttl: 900_000 } };
@@ -13,25 +17,32 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle(AUTH_THROTTLE)
   @Post('register')
-  async register(@Body() body: { email?: string; password?: string; name?: string }) {
+  async register(@Body() body: RegisterDto) {
     return this.authService.registerPublic(body);
+  }
+
+  /** Configuração pública (sem dados sensíveis). */
+  @Get('config')
+  @SkipThrottle()
+  authConfig() {
+    const isProd = process.env.NODE_ENV === 'production';
+    return {
+      publicRegister: !isProd || process.env.ALLOW_PUBLIC_REGISTER === 'true',
+    };
   }
 
   @HttpCode(HttpStatus.OK)
   @Throttle(AUTH_THROTTLE)
   @Post('request-password-reset')
-  async requestPasswordReset(@Body() body: { email?: string }) {
+  async requestPasswordReset(@Body() body: RequestPasswordResetDto) {
     return this.authService.requestPasswordReset(body.email);
   }
 
   @HttpCode(HttpStatus.OK)
   @Throttle(AUTH_THROTTLE)
   @Post('login')
-  async signIn(
-    @Body() signInDto: { email?: string; password?: string },
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.authService.signIn(signInDto?.email, signInDto?.password);
+  async signIn(@Body() signInDto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.signIn(signInDto.email, signInDto.password);
     const maxAgeMs = 8 * 60 * 60 * 1000;
     const domain = process.env.COOKIE_DOMAIN?.trim();
     const cookieBase = {
@@ -43,6 +54,7 @@ export class AuthController {
       ...(domain ? { domain } : {}),
     };
     res.cookie('token', result.access_token, cookieBase);
+    setCsrfCookie(res, maxAgeMs);
     return { name: result.name, role: result.role };
   }
 
@@ -59,6 +71,7 @@ export class AuthController {
       secure: process.env.NODE_ENV === 'production',
       ...(domain ? { domain } : {}),
     });
+    clearCsrfCookie(res);
     return { ok: true as const };
   }
 

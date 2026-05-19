@@ -445,7 +445,7 @@ export class WhatsappService {
           where: { number_userId: { number: contactNumber, userId } },
         });
         let picUrl = existingContact?.profilePictureUrl || undefined;
-
+        
         if (!picUrl) {
           picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
         }
@@ -480,19 +480,19 @@ export class WhatsappService {
 
         await this.prisma.contact.upsert({
           where: { number_userId: { number: contactNumber, userId } },
-          update: {
-            lastMessage: finalSidebarText,
-            lastMessageTime: new Date(),
-            instanceName,
+          update: { 
+            lastMessage: finalSidebarText, 
+            lastMessageTime: new Date(), 
+            instanceName, 
             ...(picUrl && { profilePictureUrl: picUrl }),
             ...groupNameUpdate,
           },
-          create: {
+          create: { 
             userId,
-            number: contactNumber,
+            number: contactNumber, 
             name: isGroupJid ? newGroupResolvedName ?? 'Grupo' : pushName || contactNumber,
-            lastMessage: finalSidebarText,
-            instanceName,
+            lastMessage: finalSidebarText, 
+            instanceName, 
             profilePictureUrl: picUrl || null,
           },
         });
@@ -510,17 +510,17 @@ export class WhatsappService {
         if (scopedWaId && !msgExists && !isSelfEchoEvent) {
           try {
             await this.prisma.message.create({
-              data: {
+              data: { 
                 id: scopedWaId,
                 userId,
-                instanceName,
-                contactNumber,
+                instanceName, 
+                contactNumber, 
                 text,
-                type: isFromMe ? 'sent' : 'received',
+                type: isFromMe ? 'sent' : 'received', 
                 timestamp: new Date(),
-                isMedia,
-                mediaData: mediaUrl || null,
-                mimeType: mimeType || null,
+                isMedia,           
+                mediaData: mediaUrl || null, 
+                mimeType: mimeType || null,          
                 fileName: fileName || null,
                 groupSenderLabel: groupSenderLabel || null,
                 messageKind: extracted.messageKind,
@@ -597,7 +597,7 @@ export class WhatsappService {
         createDisplayName =
           (await this.tryFetchGroupSubject(instanceName, contactKey, { retries: 1 })) || 'Grupo WhatsApp';
       }
-
+      
       await this.prisma.contact.upsert({
         where: { number_userId: { number: contactKey, userId } },
         update: { lastMessage: safeText, lastMessageTime: new Date(), instanceName },
@@ -612,7 +612,7 @@ export class WhatsappService {
 
       if (waId) {
         try {
-          await this.prisma.message.create({
+        await this.prisma.message.create({ 
             data: {
               id: this.buildScopedMessageId(userId, String(waId)),
               userId,
@@ -708,10 +708,10 @@ export class WhatsappService {
           `${evoBaseUrl}/message/sendMedia/${instanceName}`,
           {
             number: evoNumber,
-            mediatype,
-            mimetype: fileMimeType,
+          mediatype, 
+          mimetype: fileMimeType, 
             caption: safeCaption,
-            media: mediaUrl,
+          media: mediaUrl, 
             fileName: fileOriginalName,
           },
           { headers: evolutionHeaders },
@@ -771,17 +771,17 @@ export class WhatsappService {
       const scopedId = this.buildScopedMessageId(userId, String(waId));
       try {
         await this.prisma.message.create({
-          data: {
+        data: {
             id: scopedId,
             userId,
-            instanceName,
+          instanceName, 
             contactNumber: contactKey,
             text: safeCaption,
-            type: 'sent',
-            isMedia: true,
-            mediaData: mediaUrl,
-            mimeType: fileMimeType,
-            fileName: fileOriginalName,
+          type: 'sent',
+          isMedia: true, 
+          mediaData: mediaUrl, 
+          mimeType: fileMimeType, 
+          fileName: fileOriginalName, 
             timestamp: new Date(),
           },
         });
@@ -947,16 +947,16 @@ export class WhatsappService {
           snapshot: { contactNumber, messagesRemoved: messageCount, contact: contactRow },
         });
       });
-
+      
       try {
-        await this.prisma.contact.update({
+        await this.prisma.contact.update({ 
           where: { number_userId: { number: contactNumber, userId } },
           data: { lastMessage: '', lastMessageTime: null },
         });
       } catch (updateErr) {
         /* contacto pode não existir */
       }
-
+      
       return { success: true };
     } catch (e) {
       this.logger.error('Erro ao excluir conversa', e);
