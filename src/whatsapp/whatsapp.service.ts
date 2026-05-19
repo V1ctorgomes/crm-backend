@@ -8,6 +8,7 @@ import { PushNotificationsService } from '../notifications/push-notifications.se
 import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
 import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
 import type { AuditActor } from '../deletion-audit/delete-reason.util';
+import { extractInboundMessageContent, unwrapProtoMessage } from './whatsapp-inbound-extract';
 
 @Injectable()
 export class WhatsappService {
@@ -372,27 +373,25 @@ export class WhatsappService {
 
     const msgExists = scopedWaId ? await this.prisma.message.findUnique({ where: { id: scopedWaId } }) : null;
 
-    const msg = msgData.message;
-    let text = msg?.conversation || msg?.extendedTextMessage?.text || "";
+    const msgRaw = msgData.message;
+    if (!msgRaw || typeof msgRaw !== 'object' || Object.keys(msgRaw).length === 0) {
+      return;
+    }
 
+    const inner = unwrapProtoMessage(msgRaw);
+    const extracted = extractInboundMessageContent(inner);
+    if (extracted.skipPersist) {
+      return;
+    }
+
+    let text = extracted.text;
     let mediaUrl: string | undefined;
-    let mimeType: string | undefined;
-    let fileName: string | undefined;
-    let isMedia = false;
+    let mimeType: string | undefined = extracted.mimeType;
+    let fileName: string | undefined = extracted.fileName;
+    let isMedia = extracted.isMedia;
+    let fallbackSidebarText = extracted.fallbackSidebar;
 
-    const mediaObject = msg?.imageMessage || msg?.videoMessage || msg?.documentMessage || msg?.audioMessage || msg?.stickerMessage;
-    let fallbackSidebarText = "Mídia";
-
-    if (mediaObject) {
-      isMedia = true;
-      mimeType = mediaObject.mimetype ? String(mediaObject.mimetype).split(';')[0] : 'application/octet-stream';
-      const ext = mimeType.split('/')[1] || 'bin';
-      fileName = mediaObject.fileName ? String(mediaObject.fileName) : `arquivo.${ext}`;
-
-      // Se não houver legenda, text fica vazio
-      text = mediaObject.caption || text || "";
-      fallbackSidebarText = msg?.imageMessage ? "Imagem" : msg?.documentMessage ? "Documento" : msg?.audioMessage ? "Áudio" : msg?.videoMessage ? "Vídeo" : "Mídia";
-
+    if (extracted.isMedia && extracted.mediaObject) {
       // `send.message` é o eco de envios feitos por nós em `sendMedia`/`sendText`.
       // O ficheiro já está no R2 e a linha em `messages` é (ou está prestes a ser) criada pelo serviço de envio.
       // Baixar/subir aqui causa um segundo objeto duplicado no balde e uma linha extra de mensagem.
@@ -414,7 +413,13 @@ export class WhatsappService {
             const buffer = Buffer.from(String(response.data.base64), 'base64');
             const stableKey = scopedWaId || (waId ? `${userId}_${contactNumber}_${waId}` : undefined);
             const mediaFolder = this.r2Service.conversasPath(userId, contactNumber);
-            mediaUrl = await this.r2Service.uploadBuffer(buffer, fileName, mimeType, mediaFolder, stableKey);
+            mediaUrl = await this.r2Service.uploadBuffer(
+              buffer,
+              fileName || 'arquivo.bin',
+              mimeType || 'application/octet-stream',
+              mediaFolder,
+              stableKey,
+            );
           }
         } catch (error) {
           this.logger.error("Erro ao baixar mídia da Evolution", error);
@@ -512,6 +517,7 @@ export class WhatsappService {
                 mimeType: mimeType || null,
                 fileName: fileName || null,
                 groupSenderLabel: groupSenderLabel || null,
+                messageKind: extracted.messageKind,
               },
             });
             if (!isFromMe && payload.event === 'messages.upsert') {
@@ -537,6 +543,7 @@ export class WhatsappService {
         if (isMedia) {
           msgData.customMedia = { isMedia, mediaData: mediaUrl, mimeType, fileName, text };
         }
+        msgData.crmMessageKind = extracted.messageKind;
       }
 
       this.messageSubject.next({ ...payload, _crmUserId: userId });

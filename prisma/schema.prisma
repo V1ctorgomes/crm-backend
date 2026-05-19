@@ -167,6 +167,8 @@ model Message {
   fileName      String?
   /// Em grupos (@g.us), nome do membro que enviou a mensagem recebida.
   groupSenderLabel String? @db.Text
+  /// text | media | sticker | reaction | location | live_location | contact | contacts | poll | poll_vote | interactive | video_note | album | unsupported
+  messageKind   String?
   timestamp     DateTime @default(now())
 }
 
