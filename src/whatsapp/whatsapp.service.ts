@@ -15,6 +15,11 @@ import {
   WHATSAPP_MESSAGE_TEXT_MAX,
 } from '../common/text-bounds';
 import { sanitizeContactUpdate } from './contact-update.validation';
+import {
+  computeTypingDelayMs,
+  isTypingDelayEnabled,
+  sleepMs,
+} from './whatsapp-typing.util';
 
 @Injectable()
 export class WhatsappService {
@@ -573,6 +578,38 @@ export class WhatsappService {
     }
   }
 
+  /**
+   * Mostra «digitando...» no WhatsApp do contacto antes do envio (Evolution sendPresence).
+   */
+  private async emitComposingThenWait(
+    instanceName: string,
+    evoNumber: string,
+    textForEstimate: string,
+  ): Promise<void> {
+    if (!isTypingDelayEnabled()) return;
+    const delayMs = computeTypingDelayMs(textForEstimate);
+    try {
+      const { baseUrl, apiKey } = await this.getEvolutionCreds();
+      await axios.post(
+        `${baseUrl}/chat/sendPresence/${encodeURIComponent(instanceName)}`,
+        {
+          number: evoNumber,
+          delay: delayMs,
+          presence: 'composing',
+        },
+        {
+          headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+          timeout: 20_000,
+        },
+      );
+    } catch (e) {
+      this.logger.warn(
+        `sendPresence (composing) falhou (${instanceName}): ${(e as Error)?.message ?? e}`,
+      );
+    }
+    await sleepMs(delayMs);
+  }
+
   async sendText(userId: string, number: string, text: string, requestedInstanceName?: string) {
     const safeText = assertBoundedText(text, 'Mensagem', WHATSAPP_MESSAGE_TEXT_MAX, { min: 1 });
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
@@ -584,6 +621,7 @@ export class WhatsappService {
       throw new HttpException('Número ou grupo inválido para envio.', HttpStatus.BAD_REQUEST);
     }
     try {
+      await this.emitComposingThenWait(instanceName, evoNumber, safeText);
       const { baseUrl, apiKey } = await this.getEvolutionCreds();
       const response = await axios.post(
         `${baseUrl}/message/sendText/${instanceName}`,
