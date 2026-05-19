@@ -24,15 +24,87 @@ export function unwrapProtoMessage(message: unknown): Record<string, unknown> {
     const vm2 = asObj(cur.viewOnceMessageV2);
     const ep = asObj(cur.ephemeralMessage);
     const dwc = asObj(cur.documentWithCaptionMessage);
+    const fp = asObj(cur.futureProofMessage);
     const next =
       (vm && asObj(vm.message)) ||
       (vm2 && asObj(vm2.message)) ||
       (ep && asObj(ep.message)) ||
-      (dwc && asObj(dwc.message));
+      (dwc && asObj(dwc.message)) ||
+      (fp && asObj(fp.message));
     if (!next || Object.keys(next).length === 0) break;
     cur = next;
   }
   return cur;
+}
+
+/** Número, string numérica, ou objeto estilo protobufjs Long `{ low, high }` (timestamps WA). */
+function toFiniteNumber(u: unknown): number | null {
+  if (typeof u === 'number' && Number.isFinite(u)) return u;
+  if (typeof u === 'string' && u.trim() !== '') {
+    const n = Number(u);
+    return Number.isFinite(n) ? n : null;
+  }
+  const o = asObj(u);
+  if (o && typeof o.low === 'number') {
+    const low = o.low >>> 0;
+    const high = typeof o.high === 'number' ? o.high | 0 : 0;
+    const sum = high * 0x100000000 + low;
+    return Number.isFinite(sum) ? sum : null;
+  }
+  return null;
+}
+
+/** Segundos ou milissegundos Unix → Date */
+function normalizeWhatsAppTime(u: unknown): Date | null {
+  const n = toFiniteNumber(u);
+  if (n == null || n <= 0) return null;
+  const ms = n < 1e11 ? n * 1000 : n;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function optionLabelFromPollOption(o: unknown): string {
+  if (typeof o === 'string') return o.trim();
+  const ob = asObj(o);
+  if (!ob) return '';
+  for (const k of ['optionName', 'name', 'text', 'label', 'title'] as const) {
+    if (ob[k] != null && String(ob[k]).trim()) return String(ob[k]).trim();
+  }
+  return '';
+}
+
+/** Evolution / WA podem usar pollCreationMessage, V2 ou V3. */
+function coercePollContainer(inner: Record<string, unknown>): Record<string, unknown> | null {
+  for (const k of ['pollCreationMessage', 'pollCreationMessageV3', 'pollCreationMessageV2'] as const) {
+    const p = asObj(inner[k]);
+    if (p && Object.keys(p).length > 0) return p;
+  }
+  return null;
+}
+
+function extractPollFromContainer(poll: Record<string, unknown>): ExtractedInboundMessage {
+  const pc = asObj(poll.pollContent);
+  const src: Record<string, unknown> = pc ? { ...poll, ...pc } : poll;
+  const name =
+    [src.name, src.messageName, src.title, src.pollName, src.question]
+      .map((x) => (x != null ? String(x).trim() : ''))
+      .find(Boolean) || 'Inquérito';
+  const rawOpts =
+    (Array.isArray(src.options) && src.options) ||
+    (Array.isArray(src.pollOptions) && src.pollOptions) ||
+    (Array.isArray(src.selectableOptions) && src.selectableOptions) ||
+    [];
+  const labels = (rawOpts as unknown[]).map(optionLabelFromPollOption).filter(Boolean);
+  const line =
+    `🗳️ ${name}` + (labels.length ? `\n${labels.slice(0, 20).map((l) => `• ${l}`).join('\n')}` : '');
+  return {
+    text: line,
+    fallbackSidebar: `🗳️ ${name}`,
+    isMedia: false,
+    mediaObject: null,
+    messageKind: 'poll',
+    skipPersist: false,
+  };
 }
 
 export function extractInboundMessageContent(inner: Record<string, unknown>): ExtractedInboundMessage {
@@ -90,12 +162,15 @@ export function extractInboundMessageContent(inner: Record<string, unknown>): Ex
 
   const loc = asObj(inner.locationMessage);
   if (loc) {
-    const lat = Number(loc.degreesLatitude);
-    const lng = Number(loc.degreesLongitude);
+    const lat = toFiniteNumber(loc.degreesLatitude);
+    const lng = toFiniteNumber(loc.degreesLongitude);
     const name = loc.name ? String(loc.name) : '';
     const addr = loc.address ? String(loc.address) : '';
     const maps =
-      Number.isFinite(lat) && Number.isFinite(lng)
+      lat != null &&
+      lng != null &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng)
         ? `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`
         : '';
     const parts: string[] = ['📍 Localização'];
@@ -165,28 +240,122 @@ export function extractInboundMessageContent(inner: Record<string, unknown>): Ex
     };
   }
 
-  const poll = asObj(inner.pollCreationMessage);
-  if (poll) {
-    const name = poll.name ? String(poll.name) : 'Inquérito';
-    const opts = Array.isArray(poll.options) ? (poll.options as unknown[]) : [];
-    const labels = opts
-      .map((o) => {
-        const ob = asObj(o);
-        if (ob?.optionName != null) return String(ob.optionName);
-        if (typeof o === 'string') return o;
-        return '';
-      })
-      .filter(Boolean);
-    const line =
-      `🗳️ ${name}` + (labels.length ? `\n${labels.slice(0, 12).map((l) => `• ${l}`).join('\n')}` : '');
+  const ev = asObj(inner.eventMessage);
+  if (ev) {
+    const title = ev.name ? String(ev.name) : 'Evento';
+    const desc = ev.description ? String(ev.description) : '';
+    const start = normalizeWhatsAppTime(ev.startTime);
+    const end = normalizeWhatsAppTime(ev.endTime);
+    const joinLink = ev.joinLink ? String(ev.joinLink) : '';
+    const loc = asObj(ev.location);
+    const lines: string[] = [`📅 ${title}`];
+    if (desc) lines.push(desc);
+    if (start) lines.push(`Começa: ${start.toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}`);
+    if (end) lines.push(`Termina: ${end.toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}`);
+    if (joinLink) lines.push(joinLink);
+    if (loc) {
+      const lat = toFiniteNumber(loc.degreesLatitude);
+      const lng = toFiniteNumber(loc.degreesLongitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        lines.push(
+          `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`,
+        );
+      }
+    }
+    if (ev.isCanceled === true) lines.push('(Cancelado)');
+    const line = lines.join('\n');
     return {
       text: line,
-      fallbackSidebar: `🗳️ ${name}`,
+      fallbackSidebar: `📅 ${title}`,
       isMedia: false,
       mediaObject: null,
-      messageKind: 'poll',
+      messageKind: 'event',
       skipPersist: false,
     };
+  }
+
+  if (inner.encEventResponseMessage) {
+    const line = '📅 Participação num evento';
+    return {
+      text: line,
+      fallbackSidebar: line,
+      isMedia: false,
+      mediaObject: null,
+      messageKind: 'event',
+      skipPersist: false,
+    };
+  }
+
+  const schedCall = asObj(inner.scheduledCallCreationMessage);
+  if (schedCall) {
+    const title = schedCall.title ? String(schedCall.title) : 'Chamada agendada';
+    const ts = normalizeWhatsAppTime(schedCall.scheduledTimestampMs);
+    const line =
+      `📞 ${title}` +
+      (ts ? `\n${ts.toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}` : '');
+    return {
+      text: line,
+      fallbackSidebar: `📞 ${title}`,
+      isMedia: false,
+      mediaObject: null,
+      messageKind: 'event',
+      skipPersist: false,
+    };
+  }
+
+  const inter = asObj(inner.interactiveMessage);
+  if (inter) {
+    const native = asObj(inter.nativeFlowMessage);
+    const buttons = native && Array.isArray(native.buttons) ? (native.buttons as unknown[]) : [];
+    for (const b of buttons) {
+      const bo = asObj(b);
+      const j = bo?.buttonParamsJson != null ? String(bo.buttonParamsJson) : '';
+      if (!j || j.length < 2) continue;
+      try {
+        const parsed = JSON.parse(j) as Record<string, unknown>;
+        const hasValues = Array.isArray(parsed.values) && (parsed.values as unknown[]).length > 0;
+        const hasOptions = Array.isArray(parsed.options) && (parsed.options as unknown[]).length > 0;
+        const looksPoll =
+          hasValues ||
+          hasOptions ||
+          parsed.type === 'poll' ||
+          (typeof parsed.flow_id === 'string' && parsed.flow_id.toLowerCase().includes('poll'));
+        if (looksPoll) {
+          return extractPollFromContainer({
+            name: parsed.name ?? parsed.title ?? parsed.question ?? parsed.pollName,
+            options: hasValues
+              ? (parsed.values as unknown[]).map((v) =>
+                  typeof v === 'string' ? { optionName: v } : v,
+                )
+              : hasOptions
+                ? parsed.options
+                : undefined,
+          } as Record<string, unknown>);
+        }
+      } catch {
+        /* ignorar JSON inválido */
+      }
+    }
+    const body = asObj(inter.body);
+    const textBody = body?.text != null ? String(body.text) : '';
+    const header = asObj(inter.header);
+    const headerTitle = header?.title != null ? String(header.title) : '';
+    const line = [headerTitle, textBody].filter((x) => x.trim()).join('\n').trim();
+    if (line) {
+      return {
+        text: line,
+        fallbackSidebar: headerTitle || '📋 Interactivo',
+        isMedia: false,
+        mediaObject: null,
+        messageKind: 'interactive',
+        skipPersist: false,
+      };
+    }
+  }
+
+  const pollContainer = coercePollContainer(inner);
+  if (pollContainer) {
+    return extractPollFromContainer(pollContainer);
   }
 
   if (inner.pollUpdateMessage) {
@@ -304,6 +473,49 @@ export function extractInboundMessageContent(inner: Record<string, unknown>): Ex
       messageKind: 'text',
       skipPersist: false,
     };
+  }
+
+  const unknownPollKey = Object.keys(inner).find((k) => /^pollCreationMessage/i.test(k));
+  if (unknownPollKey) {
+    const p = asObj(inner[unknownPollKey]);
+    if (p) return extractPollFromContainer(p);
+  }
+
+  const unknownEventKey = Object.keys(inner).find(
+    (k) => k !== 'encEventResponseMessage' && /eventmessage$/i.test(k),
+  );
+  if (unknownEventKey) {
+    const ev2 = asObj(inner[unknownEventKey]);
+    if (ev2 && Object.keys(ev2).length > 0) {
+      const title = ev2.name ? String(ev2.name) : 'Evento';
+      const desc = ev2.description ? String(ev2.description) : '';
+      const start = normalizeWhatsAppTime(ev2.startTime);
+      const end = normalizeWhatsAppTime(ev2.endTime);
+      const joinLink = ev2.joinLink ? String(ev2.joinLink) : '';
+      const loc2 = asObj(ev2.location);
+      const lines: string[] = [`📅 ${title}`];
+      if (desc) lines.push(desc);
+      if (start) lines.push(`Começa: ${start.toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}`);
+      if (end) lines.push(`Termina: ${end.toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}`);
+      if (joinLink) lines.push(joinLink);
+      if (loc2) {
+        const la = toFiniteNumber(loc2.degreesLatitude);
+        const ln = toFiniteNumber(loc2.degreesLongitude);
+        if (la != null && ln != null && Number.isFinite(la) && Number.isFinite(ln)) {
+          lines.push(`https://www.google.com/maps?q=${encodeURIComponent(`${la},${ln}`)}`);
+        }
+      }
+      if (ev2.isCanceled === true) lines.push('(Cancelado)');
+      const line = lines.join('\n');
+      return {
+        text: line,
+        fallbackSidebar: `📅 ${title}`,
+        isMedia: false,
+        mediaObject: null,
+        messageKind: 'event',
+        skipPersist: false,
+      };
+    }
   }
 
   return {
