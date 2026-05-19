@@ -20,4 +20,20 @@ export function assertProductionEnvOrThrow(): void {
       'Em produção defina FRONTEND_ORIGIN (URL do frontend, ex.: https://app.exemplo.com).',
     );
   }
+
+  const webhookSecret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
+  if (!webhookSecret || webhookSecret.length < 16) {
+    throw new Error(
+      'Em produção defina WHATSAPP_WEBHOOK_SECRET com pelo menos 16 caracteres (webhook Evolution).',
+    );
+  }
+
+  const weakJwtPatterns = ['change-me', 'secret', 'password', 'crm-dev-jwt'];
+  if (weakJwtPatterns.some((p) => jwt!.toLowerCase().includes(p))) {
+    throw new Error('JWT_SECRET em produção não pode conter valores previsíveis ou de exemplo.');
+  }
+
+  if (!process.env.DATABASE_URL?.trim()) {
+    throw new Error('Em produção defina DATABASE_URL.');
+  }
 }

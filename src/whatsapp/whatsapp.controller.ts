@@ -22,6 +22,9 @@ import { filter, map } from 'rxjs/operators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { assertWebhookAuthorized } from '../common/webhook-auth';
+import { assertCrmUpload } from '../common/upload-media.validation';
+import { parseBoundedInt } from '../common/parse-bounded-int';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
@@ -33,22 +36,16 @@ function actorFromReq(req: { user: { userId: string; email: string; role: string
 export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}
 
+  /** Evolution: autenticação por segredo; rate limit no middleware Express. */
   @Post('webhook')
   async handleWebhook(
-    @Body() payload: any,
+    @Body() payload: unknown,
     @Headers('x-crm-webhook-secret') secretHeader?: string,
     @Query('token') tokenQuery?: string,
   ) {
-    const expected = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
-    if (expected) {
-      const ok = secretHeader === expected || tokenQuery === expected;
-      if (!ok) {
-        throw new UnauthorizedException('Webhook não autorizado.');
-      }
-    } else if (process.env.NODE_ENV === 'production') {
-      throw new UnauthorizedException(
-        'Defina WHATSAPP_WEBHOOK_SECRET no servidor e use ?token=… na URL do webhook ou o header x-crm-webhook-secret.',
-      );
+    assertWebhookAuthorized(secretHeader, tokenQuery);
+    if (!payload || typeof payload !== 'object') {
+      throw new UnauthorizedException('Payload inválido.');
     }
     return this.whatsappService.processWebhook(payload);
   }
@@ -86,8 +83,10 @@ export class WhatsappController {
     @Query('limit') limitStr?: string,
     @Query('before') beforeMessageId?: string,
   ) {
-    const parsed = limitStr !== undefined && limitStr !== '' ? parseInt(limitStr, 10) : NaN;
-    const limit = Number.isFinite(parsed) ? parsed : undefined;
+    const limit =
+      limitStr !== undefined && limitStr !== ''
+        ? parseBoundedInt(limitStr, 50, 1, 200)
+        : undefined;
     return this.whatsappService.getChatHistory(req.user.userId, number, {
       limit,
       beforeMessageId: beforeMessageId?.trim() || undefined,
@@ -162,6 +161,7 @@ export class WhatsappController {
     @UploadedFile() file: any, 
     @Body() body: { number: string; caption: string; instanceName?: string }
   ) {
+    assertCrmUpload(file, 'Mídia');
     return this.whatsappService.sendMedia(req.user.userId, body.number, file, body.caption || '', body.instanceName);
   }
 

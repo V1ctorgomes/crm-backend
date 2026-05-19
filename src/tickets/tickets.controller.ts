@@ -5,6 +5,7 @@ import { TicketsService } from './tickets.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { assertCrmUpload } from '../common/upload-media.validation';
 
 function actorFromReq(req: { user: { userId: string; email: string; role: string } }) {
   return { userId: req.user.userId, email: req.user.email, role: req.user.role };
@@ -71,6 +72,7 @@ export class TicketsController {
     }),
   )
   uploadTicketFile(@Req() req: any, @Param('id') id: string, @UploadedFile() file: any, @Body('description') description?: string) {
+    assertCrmUpload(file, 'Ficheiro');
     return this.ticketsService.uploadTicketFile(req.user.userId, id, file, description);
   }
 

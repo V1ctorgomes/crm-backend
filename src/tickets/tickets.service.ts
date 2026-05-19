@@ -8,6 +8,8 @@ import { TicketCatalogService } from '../ticket-catalog/ticket-catalog.service';
 import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
 import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
 import type { AuditActor } from '../deletion-audit/delete-reason.util';
+import { assertBoundedText, CRM_TEXT_SHORT_MAX } from '../common/text-bounds';
+import { assertCrmUpload } from '../common/upload-media.validation';
 
 @Injectable()
 export class TicketsService implements OnModuleInit {
@@ -129,7 +131,7 @@ export class TicketsService implements OnModuleInit {
   }
 
   async uploadTicketFile(userId: string, ticketId: string, file: any, description?: string) {
-    if (!file) throw new HttpException('Arquivo ausente', HttpStatus.BAD_REQUEST);
+    assertCrmUpload(file, 'Ficheiro');
     await this.ensureTicketOwner(userId, ticketId);
     
     const folder = this.r2Service.solicitacoesTicketPath(userId, ticketId);
@@ -492,11 +494,14 @@ export class TicketsService implements OnModuleInit {
   async toggleArchiveTicket(userId: string, ticketId: string, isArchived: boolean, resolution?: string, resolutionReason?: string) {
     await this.ensureTicketOwner(userId, ticketId);
     const sanitizedReason = assertResolutionReasonWhenArchiving(isArchived, resolution, resolutionReason);
-    const dataToUpdate: any = { isArchived };
+    const dataToUpdate: Prisma.TicketUpdateInput = { isArchived };
 
     if (isArchived) {
-      if (resolution) dataToUpdate.resolution = resolution;
-      if (sanitizedReason !== undefined) dataToUpdate.resolutionReason = sanitizedReason;
+      const res = String(resolution ?? '')
+        .trim()
+        .toUpperCase();
+      dataToUpdate.resolution = res;
+      dataToUpdate.resolutionReason = sanitizedReason ?? null;
     } else {
       dataToUpdate.resolution = null;
       dataToUpdate.resolutionReason = null;
@@ -507,7 +512,8 @@ export class TicketsService implements OnModuleInit {
 
   async addNote(userId: string, ticketId: string, text: string) {
     await this.ensureTicketOwner(userId, ticketId);
-    return this.prisma.note.create({ data: { ticketId, text } });
+    const safeText = assertBoundedText(text, 'Nota', CRM_TEXT_SHORT_MAX, { min: 1 });
+    return this.prisma.note.create({ data: { ticketId, text: safeText } });
   }
 
   async deleteNote(userId: string, id: string, actor: AuditActor, rawReason?: string) {
@@ -527,12 +533,17 @@ export class TicketsService implements OnModuleInit {
 
   async addTask(userId: string, ticketId: string, title: string, dueDate: string) {
     await this.ensureTicketOwner(userId, ticketId);
+    const safeTitle = assertBoundedText(title, 'Título da tarefa', CRM_TEXT_SHORT_MAX, { min: 1 });
+    const due = new Date(String(dueDate ?? ''));
+    if (Number.isNaN(due.getTime())) {
+      throw new HttpException('Data de vencimento inválida.', HttpStatus.BAD_REQUEST);
+    }
     return this.prisma.task.create({
       data: {
         ticketId,
-        title,
-        dueDate: new Date(dueDate)
-      }
+        title: safeTitle,
+        dueDate: due,
+      },
     });
   }
 

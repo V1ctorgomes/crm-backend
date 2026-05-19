@@ -1,38 +1,37 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+
+/** Rotas públicas de autenticação — limite mais baixo que a API geral. */
+const AUTH_THROTTLE = { default: { limit: 15, ttl: 900_000 } };
 
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
 
   @HttpCode(HttpStatus.CREATED)
+  @Throttle(AUTH_THROTTLE)
   @Post('register')
-  @UseGuards(ThrottlerGuard)
-  async register(@Body() body: Record<string, any>) {
-    return this.authService.registerPublic({
-      email: body.email,
-      password: body.password,
-      name: body.name,
-    });
+  async register(@Body() body: { email?: string; password?: string; name?: string }) {
+    return this.authService.registerPublic(body);
   }
 
   @HttpCode(HttpStatus.OK)
+  @Throttle(AUTH_THROTTLE)
   @Post('request-password-reset')
-  @UseGuards(ThrottlerGuard)
-  async requestPasswordReset(@Body() body: Record<string, any>) {
+  async requestPasswordReset(@Body() body: { email?: string }) {
     return this.authService.requestPasswordReset(body.email);
   }
 
   @HttpCode(HttpStatus.OK)
+  @Throttle(AUTH_THROTTLE)
   @Post('login')
-  @UseGuards(ThrottlerGuard)
   async signIn(
-    @Body() signInDto: Record<string, any>,
+    @Body() signInDto: { email?: string; password?: string },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.signIn(signInDto.email, signInDto.password);
+    const result = await this.authService.signIn(signInDto?.email, signInDto?.password);
     const maxAgeMs = 8 * 60 * 60 * 1000;
     const domain = process.env.COOKIE_DOMAIN?.trim();
     const cookieBase = {
@@ -49,6 +48,7 @@ export class AuthController {
 
   /** Remove o cookie HttpOnly (público: o browser pode chamar após falha de rede). */
   @HttpCode(HttpStatus.OK)
+  @SkipThrottle()
   @Post('logout')
   logout(@Res({ passthrough: true }) res: Response) {
     const domain = process.env.COOKIE_DOMAIN?.trim();
@@ -64,8 +64,10 @@ export class AuthController {
 
   /** Público: últimos membros (avatar + nome) para o banner do login. */
   @Get('recent-members')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   recentMembers(@Query('limit') limit?: string) {
     const n = limit ? parseInt(limit, 10) : 3;
-    return this.authService.findRecentMembersForLogin(Number.isFinite(n) ? n : 3);
+    const capped = Number.isFinite(n) ? Math.min(Math.max(n, 1), 12) : 3;
+    return this.authService.findRecentMembersForLogin(capped);
   }
 }

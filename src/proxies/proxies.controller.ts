@@ -16,6 +16,7 @@ export class ProxiesController {
   }
 
   @Get()
+  @Roles('ADMIN', 'DEVELOPER')
   findAll() {
     return this.proxiesService.findAll();
   }

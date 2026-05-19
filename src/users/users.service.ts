@@ -5,6 +5,10 @@ import * as bcrypt from 'bcrypt';
 import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
 import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
 import type { AuditActor } from '../deletion-audit/delete-reason.util';
+import { assertPassword, assertRegisterName, normalizeEmail } from '../auth/auth-input.validation';
+import { assertProfileImageUpload } from '../common/upload-image.validation';
+import { assertUuidParam } from '../common/uuid-param';
+import { USER_PUBLIC_SELECT } from '../common/user-public.select';
 
 function canManageAllUsers(role: string): boolean {
   return role === 'ADMIN' || role === 'DEVELOPER';
@@ -19,26 +23,16 @@ export class UsersService {
   ) {}
 
   async findAll(actorUserId: string, actorRole: string) {
-    const publicSelect = {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      approved: true,
-      createdAt: true,
-      updatedAt: true,
-      profilePictureUrl: true,
-    } as const;
     if (canManageAllUsers(actorRole)) {
       return this.prisma.user.findMany({
         where: { approved: true },
         orderBy: { createdAt: 'desc' },
-        select: publicSelect,
+        select: USER_PUBLIC_SELECT,
       });
     }
     const user = await this.prisma.user.findUnique({
       where: { id: actorUserId },
-      select: publicSelect,
+      select: USER_PUBLIC_SELECT,
     });
     return user ? [user] : [];
   }
@@ -109,12 +103,10 @@ export class UsersService {
     if (!canManageAllUsers(actorRole)) {
       throw new ForbiddenException('Sem permissão para concluir este pedido.');
     }
-    const pwd = String(rawPassword || '');
-    if (pwd.length < 8) {
-      throw new BadRequestException('A nova palavra-passe deve ter pelo menos 8 caracteres.');
-    }
+    const pwd = assertPassword(rawPassword, 'nova palavra-passe');
+    const reqId = assertUuidParam(requestId, 'Pedido');
     const row = await this.prisma.passwordResetRequest.findUnique({
-      where: { id: requestId },
+      where: { id: reqId },
       include: { user: { select: { id: true } } },
     });
     if (!row || row.status !== 'PENDING') {
@@ -127,7 +119,7 @@ export class UsersService {
         data: { password: hashed },
       }),
       this.prisma.passwordResetRequest.update({
-        where: { id: requestId },
+        where: { id: reqId },
         data: { status: 'COMPLETED', completedAt: new Date() },
       }),
     ]);
@@ -139,42 +131,54 @@ export class UsersService {
 
   /** Perfil do usuario autenticado (sidebar, configurações, instâncias). */
   async findMe(actorUserId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: actorUserId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: actorUserId },
+      select: USER_PUBLIC_SELECT,
+    });
     if (!user) throw new NotFoundException('Usuario não encontrado.');
     return user;
   }
 
   async findOne(actorUserId: string, actorRole: string, id: string) {
-    if (canManageAllUsers(actorRole) || actorUserId === id) {
-      return this.prisma.user.findUnique({ where: { id } });
+    const targetId = assertUuidParam(id, 'Utilizador');
+    if (!canManageAllUsers(actorRole) && actorUserId !== targetId) {
+      throw new ForbiddenException('Sem permissão para ver este utilizador.');
     }
-    return null;
+    const user = await this.prisma.user.findUnique({
+      where: { id: targetId },
+      select: USER_PUBLIC_SELECT,
+    });
+    if (!user) throw new NotFoundException('Utilizador não encontrado.');
+    return user;
   }
 
   async create(actorUserId: string, actorRole: string, data: any) {
     if (!canManageAllUsers(actorRole)) {
       throw new ForbiddenException('Apenas administradores ou developers podem criar usuarios.');
     }
-    const password = String(data.password || '');
-    if (!password.trim()) {
-      throw new ForbiddenException('Palavra-passe é obrigatória para novos usuarios.');
-    }
+    const password = assertPassword(data.password, 'palavra-passe');
+    const email = normalizeEmail(data.email);
+    const name = assertRegisterName(data.name);
     const hashed = await bcrypt.hash(password, 10);
     let role = 'USER';
     if (actorRole === 'ADMIN') {
       role = 'USER';
     } else if (actorRole === 'DEVELOPER') {
       const r = String(data.role || 'USER').toUpperCase();
-      role = r === 'USER' || r === 'DEVELOPER' || r === 'ADMIN' ? r : 'USER';
+      if (r === 'ADMIN') {
+        throw new ForbiddenException('Developers não podem criar contas ADMIN.');
+      }
+      role = r === 'DEVELOPER' ? 'DEVELOPER' : 'USER';
     }
     return this.prisma.user.create({
       data: {
-        name: data.name,
-        email: data.email,
+        name,
+        email,
         password: hashed,
         role,
         approved: true,
       },
+      select: USER_PUBLIC_SELECT,
     });
   }
 
@@ -192,8 +196,8 @@ export class UsersService {
 
     const updateData: any = {};
 
-    if (data.name) updateData.name = data.name;
-    if (data.email) updateData.email = data.email;
+    if (data.name) updateData.name = assertRegisterName(data.name);
+    if (data.email) updateData.email = normalizeEmail(data.email);
 
     if (data.role !== undefined && data.role !== null && canManageAllUsers(actorRole)) {
       if (actorRole === 'ADMIN') {
@@ -202,15 +206,20 @@ export class UsersService {
         }
       } else if (actorRole === 'DEVELOPER') {
         const r = String(data.role).toUpperCase();
-        if (r === 'USER' || r === 'DEVELOPER' || r === 'ADMIN') {
+        if (r === 'ADMIN') {
+          throw new ForbiddenException('Developers não podem atribuir papel ADMIN.');
+        }
+        if (r === 'USER' || r === 'DEVELOPER') {
           updateData.role = r;
         }
       }
     }
 
     if (data.password && String(data.password).trim() !== '') {
-      updateData.password = await bcrypt.hash(String(data.password), 10);
+      updateData.password = await bcrypt.hash(assertPassword(data.password), 10);
     }
+
+    assertProfileImageUpload(file);
 
     let previousProfilePictureUrl: string | null = null;
     if (file) {
@@ -225,6 +234,7 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id },
       data: updateData,
+      select: USER_PUBLIC_SELECT,
     });
 
     if (file && previousProfilePictureUrl && previousProfilePictureUrl !== user.profilePictureUrl) {

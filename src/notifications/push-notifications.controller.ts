@@ -40,6 +40,9 @@ export class PushNotificationsController {
     ) {
       throw new BadRequestException('Subscrição push inválida.');
     }
+    if (body.endpoint.length > 2048) {
+      throw new BadRequestException('Endpoint push inválido.');
+    }
     await this.pushService.saveSubscription(req.user.userId, body, userAgent);
     return { ok: true };
   }

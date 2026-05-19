@@ -1,12 +1,8 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { assertPassword, assertRegisterName, normalizeEmail } from './auth-input.validation';
 
 @Injectable()
 export class AuthService {
@@ -17,25 +13,21 @@ export class AuthService {
 
   /** Registo público: sempre perfil USER, aguarda aprovação de administrador. */
   async registerPublic(raw: { email?: string; password?: string; name?: string }): Promise<{ ok: true; message: string }> {
-    const email = String(raw.email || '')
-      .trim()
-      .toLowerCase();
-    const password = String(raw.password || '');
-    const name = String(raw.name || '').trim();
-
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException('Indique um e-mail válido.');
+    if (
+      process.env.NODE_ENV === 'production' &&
+      process.env.ALLOW_PUBLIC_REGISTER !== 'true'
+    ) {
+      throw new ForbiddenException('Registo público desactivado neste ambiente.');
     }
-    if (password.length < 8) {
-      throw new BadRequestException('A palavra-passe deve ter pelo menos 8 caracteres.');
-    }
-    if (name.length < 2) {
-      throw new BadRequestException('Indique o seu nome (mínimo 2 caracteres).');
-    }
+    const email = normalizeEmail(raw.email);
+    const password = assertPassword(raw.password);
+    const name = assertRegisterName(raw.name);
 
     const exists = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (exists) {
-      throw new ConflictException('Este e-mail já está registado.');
+      throw new ConflictException(
+        'Não foi possível concluir o registo com estes dados. Se já tem conta, peça aprovação ou recuperação de palavra-passe.',
+      );
     }
 
     const hashed = await bcrypt.hash(password, 10);
@@ -61,12 +53,7 @@ export class AuthService {
    * Resposta genérica se o e-mail não existir (evita enumeração de contas).
    */
   async requestPasswordReset(rawEmail?: string): Promise<{ ok: true; message: string }> {
-    const email = String(rawEmail || '')
-      .trim()
-      .toLowerCase();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException('Indique um e-mail válido.');
-    }
+    const email = normalizeEmail(rawEmail);
     const generic = {
       ok: true as const,
       message:
@@ -85,10 +72,9 @@ export class AuthService {
     return generic;
   }
 
-  async signIn(rawEmail: string, pass: string): Promise<{ access_token: string; name: string; role: string }> {
-    const email = String(rawEmail || '')
-      .trim()
-      .toLowerCase();
+  async signIn(rawEmail: unknown, rawPassword: unknown): Promise<{ access_token: string; name: string; role: string }> {
+    const email = normalizeEmail(rawEmail);
+    const password = assertPassword(rawPassword);
     // 1. Procura o usuario pelo email
     const user = await this.prisma.user.findUnique({
       where: { email },
@@ -99,7 +85,7 @@ export class AuthService {
     }
 
     // 2. Compara a palavra-passe enviada com a hash guardada na base de dados
-    const isPasswordValid = await bcrypt.compare(pass, user.password);
+    const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Credenciais inválidas');

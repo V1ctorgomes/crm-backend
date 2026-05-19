@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { getJwtSecret } from '../config/jwt-secret';
+import type { AuthenticatedUser, JwtPayload } from './auth.types';
 
 function jwtFromCookieOrBearer(req: Request): string | null {
   const fromCookie = req?.cookies?.token;
@@ -23,7 +24,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: any) {
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    if (!payload?.sub || typeof payload.sub !== 'string') {
+      throw new UnauthorizedException('Sessão inválida.');
+    }
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: { id: true, email: true, role: true, approved: true },

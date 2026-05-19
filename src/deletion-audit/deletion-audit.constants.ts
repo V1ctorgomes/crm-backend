@@ -1,6 +1,9 @@
 /** Alinhado ao mínimo do frontend (`MIN_DELETE_REASON_LENGTH`). */
 export const DELETE_REASON_MIN_LEN = 10;
 
+/** Alinhado ao máximo do frontend (`MAX_DELETE_REASON_LENGTH`). */
+export const DELETE_REASON_MAX_LEN = 2000;
+
 export const DeletionResourceType = {
   TICKET: 'TICKET',
   TICKET_FILE: 'TICKET_FILE',

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as webPush from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -40,6 +40,14 @@ export class PushNotificationsService implements OnModuleInit {
     body: PushSubscribeBody,
     userAgent?: string | null,
   ) {
+    const existing = await this.prisma.pushSubscription.findUnique({
+      where: { endpoint: body.endpoint },
+      select: { userId: true },
+    });
+    if (existing && existing.userId !== userId) {
+      throw new ForbiddenException('Este endpoint push já pertence a outra conta.');
+    }
+
     await this.prisma.pushSubscription.upsert({
       where: { endpoint: body.endpoint },
       update: {

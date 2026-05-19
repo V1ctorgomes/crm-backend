@@ -4,6 +4,8 @@ import axios from 'axios';
 import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
 import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
 import type { AuditActor } from '../deletion-audit/delete-reason.util';
+import { sanitizeInstanceCreate, sanitizeInstanceName } from './instances.validation';
+import { maskSecret } from '../common/mask-secret';
 
 @Injectable()
 export class InstancesService {
@@ -53,31 +55,36 @@ export class InstancesService {
       this.logger.warn('Não foi possível verificar o status das instâncias. Verifique as credenciais da API.');
     }
     
-    return this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+    return rows.map((row) => ({
+      ...row,
+      proxyPass: row.proxyPass ? maskSecret(row.proxyPass) : null,
+    }));
   }
 
-  async create(userId: string, data: any) {
+  async create(userId: string, data: Record<string, unknown>) {
+    const input = sanitizeInstanceCreate(data);
     // 1. Vai buscar as credenciais atualizadas à BD
     const { evoUrl, evoKey } = await this.getEvolutionCredentials();
 
     try {
       const payload: any = {
-        instanceName: data.name,
+        instanceName: input.name,
         qrcode: false, 
         integration: "WHATSAPP-BAILEYS"
       };
 
       // 2. Disparar pedido de criação para a Evolution
       await axios.post(`${evoUrl}/instance/create`, payload, { headers: { apikey: evoKey } });
-      this.logger.log(`Instância ${data.name} criada com sucesso na Evolution API v2.`);
+      this.logger.log(`Instância ${input.name} criada com sucesso na Evolution API v2.`);
 
       // 3. Forçar a configuração do Proxy através do endpoint dedicado
-      if (data.proxyHost && data.proxyPort) {
+      if (input.proxyHost && input.proxyPort) {
         const proxySetPayload: any = {
           enabled: true,
-          host: String(data.proxyHost).trim(),
-          port: String(data.proxyPort), 
-          protocol: String(data.proxyProto || "http").toLowerCase().trim()
+          host: input.proxyHost,
+          port: input.proxyPort,
+          protocol: input.proxyProto,
         };
 
         if (data.proxyUser && data.proxyPass) {
@@ -86,12 +93,12 @@ export class InstancesService {
         }
 
         try {
-          await axios.post(`${evoUrl}/proxy/set/${data.name}`, proxySetPayload, { 
+          await axios.post(`${evoUrl}/proxy/set/${encodeURIComponent(input.name)}`, proxySetPayload, { 
             headers: { 'Content-Type': 'application/json', apikey: evoKey } 
           });
-          this.logger.log(`Proxy configurado com sucesso para a instância ${data.name}`);
+          this.logger.log(`Proxy configurado com sucesso para a instância ${input.name}`);
         } catch (proxyErr: any) {
-          await axios.delete(`${evoUrl}/instance/delete/${data.name}`, { headers: { apikey: evoKey } }).catch(() => {});
+          await axios.delete(`${evoUrl}/instance/delete/${encodeURIComponent(input.name)}`, { headers: { apikey: evoKey } }).catch(() => {});
           let errorMsg = "Erro desconhecido de proxy";
           const resData = proxyErr?.response?.data;
           
@@ -110,7 +117,7 @@ export class InstancesService {
       const webhookUrlResolved = this.buildWebhookUrlForEvolution();
       if (webhookUrlResolved) {
         await new Promise(resolve => setTimeout(resolve, 1500));
-        await axios.post(`${evoUrl}/webhook/set/${data.name}`, {
+        await axios.post(`${evoUrl}/webhook/set/${encodeURIComponent(input.name)}`, {
           webhook: {
             enabled: true,
             url: webhookUrlResolved,
@@ -128,19 +135,23 @@ export class InstancesService {
       }
 
       // 5. Salvar no Banco de Dados
-      return await this.prisma.instance.create({ 
+      const created = await this.prisma.instance.create({
         data: {
-          name: data.name, 
+          name: input.name,
           userId,
-          rejectCalls: data.rejectCalls || false, 
-          ignoreGroups: data.ignoreGroups || false,
-          proxyHost: data.proxyHost || null, 
-          proxyPort: data.proxyPort ? String(data.proxyPort) : null, 
-          proxyUser: data.proxyUser || null, 
-          proxyPass: data.proxyPass || null, 
-          proxyProto: data.proxyProto || 'http'
-        } 
+          rejectCalls: Boolean(data.rejectCalls),
+          ignoreGroups: Boolean(data.ignoreGroups),
+          proxyHost: input.proxyHost || null,
+          proxyPort: input.proxyPort || null,
+          proxyUser: data.proxyUser ? String(data.proxyUser) : null,
+          proxyPass: data.proxyPass ? String(data.proxyPass) : null,
+          proxyProto: input.proxyProto,
+        },
       });
+      return {
+        ...created,
+        proxyPass: created.proxyPass ? maskSecret(created.proxyPass) : null,
+      };
 
     } catch (error: any) {
       if (error instanceof HttpException) throw error; 

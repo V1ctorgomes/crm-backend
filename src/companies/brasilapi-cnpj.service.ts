@@ -16,7 +16,7 @@ export class BrasilApiCnpjService {
 
   constructor() {
     const raw = process.env.BRASILAPI_CNPJ_BASE_URL || 'https://brasilapi.com.br/api/cnpj/v1';
-    this.baseUrl = raw.replace(/\/+$/, '');
+    this.baseUrl = assertAllowedBrasilApiBase(raw);
   }
 
   async lookup(rawCnpj: string): Promise<CnpjLookupResult> {
@@ -74,4 +74,23 @@ export class BrasilApiCnpjService {
       );
     }
   }
+}
+
+const ALLOWED_BRASILAPI_HOSTS = new Set(['brasilapi.com.br', 'www.brasilapi.com.br']);
+
+function assertAllowedBrasilApiBase(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new HttpException('BRASILAPI_CNPJ_BASE_URL inválida.', HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+  if (url.protocol !== 'https:') {
+    throw new HttpException('BRASILAPI_CNPJ_BASE_URL deve ser HTTPS.', HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+  const host = url.hostname.toLowerCase();
+  if (!ALLOWED_BRASILAPI_HOSTS.has(host)) {
+    throw new HttpException('Host da API de CNPJ não permitido.', HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+  return url.toString().replace(/\/+$/, '');
 }

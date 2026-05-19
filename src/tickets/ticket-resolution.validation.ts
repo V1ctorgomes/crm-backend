@@ -4,7 +4,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 export const TICKET_RESOLUTION_REASON_MIN = 10;
 export const TICKET_RESOLUTION_REASON_MAX = 500;
 
-const RESOLUTIONS_REQUIRING_REASON = new Set(['SUCCESS', 'CANCELLED']);
+const VALID_RESOLUTIONS = new Set(['SUCCESS', 'CANCELLED']);
 
 export function assertResolutionReasonWhenArchiving(
   isArchived: boolean,
@@ -13,17 +13,17 @@ export function assertResolutionReasonWhenArchiving(
 ): string | undefined {
   if (!isArchived) return undefined;
 
-  const res = resolution ? String(resolution).trim().toUpperCase() : '';
-  if (!RESOLUTIONS_REQUIRING_REASON.has(res)) {
-    return resolutionReason !== undefined ? String(resolutionReason).trim() : undefined;
+  const res = String(resolution ?? '')
+    .trim()
+    .toUpperCase();
+  if (!VALID_RESOLUTIONS.has(res)) {
+    throw new HttpException(
+      'Desfecho inválido. Use SUCCESS (ganho) ou CANCELLED (perda).',
+      HttpStatus.BAD_REQUEST,
+    );
   }
 
-  const label =
-    res === 'SUCCESS'
-      ? 'Justificativa do ganho'
-      : res === 'CANCELLED'
-        ? 'Justificativa da perda'
-        : 'Justificativa do encerramento';
+  const label = res === 'SUCCESS' ? 'Justificativa do ganho' : 'Justificativa da perda';
 
   const text = resolutionReason !== undefined ? String(resolutionReason).trim() : '';
   if (!text) {

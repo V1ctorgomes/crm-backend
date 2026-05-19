@@ -1,25 +1,55 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { maskSecret } from '../common/mask-secret';
+import { sanitizeProxyInput } from './proxies.validation';
+
+function toPublicProxy(row: {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string | null;
+  password: string | null;
+  protocol: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: row.id,
+    name: row.name,
+    host: row.host,
+    port: row.port,
+    username: row.username,
+    protocol: row.protocol,
+    passwordSet: Boolean(row.password),
+    password: maskSecret(row.password),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 @Injectable()
 export class ProxiesService {
   constructor(private prisma: PrismaService) {}
 
-  create(data: any) {
-    return this.prisma.proxy.create({
+  async create(data: Record<string, unknown>) {
+    const input = sanitizeProxyInput(data);
+    const row = await this.prisma.proxy.create({
       data: {
-        name: data.name,
-        host: data.host,
-        port: Number(data.port),
-        username: data.username || null,
-        password: data.password || null,
-        protocol: data.protocol || 'http',
+        name: input.name,
+        host: input.host,
+        port: input.port,
+        username: input.username,
+        password: input.password,
+        protocol: input.protocol,
       },
     });
+    return toPublicProxy(row);
   }
 
-  findAll() {
-    return this.prisma.proxy.findMany({ orderBy: { createdAt: 'desc' } });
+  async findAll() {
+    const rows = await this.prisma.proxy.findMany({ orderBy: { createdAt: 'desc' } });
+    return rows.map(toPublicProxy);
   }
 
   remove(id: string) {

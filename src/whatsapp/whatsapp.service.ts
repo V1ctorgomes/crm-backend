@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Subject } from 'rxjs';
@@ -9,6 +8,13 @@ import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
 import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
 import type { AuditActor } from '../deletion-audit/delete-reason.util';
 import { extractInboundMessageContent, unwrapProtoMessage } from './whatsapp-inbound-extract';
+import {
+  assertBoundedText,
+  assertOptionalBoundedText,
+  WHATSAPP_CAPTION_MAX,
+  WHATSAPP_MESSAGE_TEXT_MAX,
+} from '../common/text-bounds';
+import { sanitizeContactUpdate } from './contact-update.validation';
 
 @Injectable()
 export class WhatsappService {
@@ -568,6 +574,7 @@ export class WhatsappService {
   }
 
   async sendText(userId: string, number: string, text: string, requestedInstanceName?: string) {
+    const safeText = assertBoundedText(text, 'Mensagem', WHATSAPP_MESSAGE_TEXT_MAX, { min: 1 });
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
@@ -580,7 +587,7 @@ export class WhatsappService {
       const { baseUrl, apiKey } = await this.getEvolutionCreds();
       const response = await axios.post(
         `${baseUrl}/message/sendText/${instanceName}`,
-        { number: evoNumber, text },
+        { number: evoNumber, text: safeText },
         { headers: { apikey: apiKey } }
       );
       const waId = response.data?.key?.id;
@@ -593,12 +600,12 @@ export class WhatsappService {
 
       await this.prisma.contact.upsert({
         where: { number_userId: { number: contactKey, userId } },
-        update: { lastMessage: text, lastMessageTime: new Date(), instanceName },
+        update: { lastMessage: safeText, lastMessageTime: new Date(), instanceName },
         create: {
           number: contactKey,
           userId,
           name: createDisplayName ?? contactKey,
-          lastMessage: text,
+          lastMessage: safeText,
           instanceName,
         },
       });
@@ -611,7 +618,7 @@ export class WhatsappService {
               userId,
               instanceName,
               contactNumber: contactKey,
-              text,
+              text: safeText,
               type: 'sent',
               timestamp: new Date(),
             },
@@ -639,6 +646,8 @@ export class WhatsappService {
   }
 
   async sendMedia(userId: string, number: string, file: any, caption: string, requestedInstanceName?: string) {
+    const safeCaption =
+      assertOptionalBoundedText(caption, 'Legenda', WHATSAPP_CAPTION_MAX) ?? '';
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
     const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
@@ -701,7 +710,7 @@ export class WhatsappService {
             number: evoNumber,
             mediatype,
             mimetype: fileMimeType,
-            caption: caption || '',
+            caption: safeCaption,
             media: mediaUrl,
             fileName: fileOriginalName,
           },
@@ -749,12 +758,12 @@ export class WhatsappService {
 
       await this.prisma.contact.upsert({
         where: { number_userId: { number: contactKey, userId } },
-        update: { lastMessage: caption || fallbackText, lastMessageTime: new Date(), instanceName },
+        update: { lastMessage: safeCaption || fallbackText, lastMessageTime: new Date(), instanceName },
         create: {
           number: contactKey,
           userId,
           name: createDisplayNameMedia ?? contactKey,
-          lastMessage: caption || fallbackText,
+          lastMessage: safeCaption || fallbackText,
           instanceName,
         },
       });
@@ -767,7 +776,7 @@ export class WhatsappService {
             userId,
             instanceName,
             contactNumber: contactKey,
-            text: caption || '',
+            text: safeCaption,
             type: 'sent',
             isMedia: true,
             mediaData: mediaUrl,
@@ -1094,12 +1103,13 @@ export class WhatsappService {
     };
   }
 
-  async updateContact(userId: string, number: string, data: any) {
+  async updateContact(userId: string, number: string, data: Record<string, unknown>) {
     const contactKey = this.normalizeStoredContactKey(String(number || '').trim());
+    const sanitized = sanitizeContactUpdate(data);
     const updateData: Record<string, unknown> = {};
-    if (data.name !== undefined && data.name !== null) updateData.name = data.name;
-    if (data.email !== undefined) updateData.email = data.email;
-    if (data.cnpj !== undefined) updateData.cnpj = data.cnpj;
+    if (sanitized.name !== undefined) updateData.name = sanitized.name;
+    if (sanitized.email !== undefined) updateData.email = sanitized.email;
+    if (sanitized.cpf !== undefined) updateData.cnpj = sanitized.cpf;
     if (data.contactKind !== undefined && data.contactKind !== null) {
       const k = String(data.contactKind).toUpperCase();
       if (k === 'UNKNOWN' || k === 'CUSTOMER' || k === 'INTERNAL') {

@@ -6,6 +6,7 @@ import { DeletionRevertService } from '../deletion-audit/deletion-revert.service
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { PROFILE_IMAGE_MAX_BYTES } from '../common/upload-image.validation';
 
 function actorFromReq(req: { user: { userId: string; email: string; role: string } }) {
   return { userId: req.user.userId, email: req.user.email, role: req.user.role };
@@ -95,7 +96,7 @@ export class UsersController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits: { fileSize: 20 * 1024 * 1024 },
+      limits: { fileSize: PROFILE_IMAGE_MAX_BYTES },
     }),
   )
   update(@Req() req: any, @Param('id') id: string, @UploadedFile() file: any, @Body() body: any) {
