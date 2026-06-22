@@ -14,6 +14,24 @@ function canManageAllUsers(role: string): boolean {
   return role === 'ADMIN' || role === 'DEVELOPER';
 }
 
+/** Papéis que ADMIN ou DEVELOPER podem atribuir a outros utilizadores. */
+function resolveManagedUserRole(actorRole: string, requestedRole: unknown): 'USER' | 'DEVELOPER' {
+  const r = String(requestedRole || 'USER').toUpperCase();
+  if (actorRole === 'DEVELOPER') {
+    if (r === 'ADMIN') {
+      throw new ForbiddenException('Developers não podem atribuir papel ADMIN.');
+    }
+    return r === 'DEVELOPER' ? 'DEVELOPER' : 'USER';
+  }
+  if (actorRole === 'ADMIN') {
+    if (r === 'ADMIN') {
+      throw new ForbiddenException('Administradores não podem atribuir papel ADMIN a outros utilizadores.');
+    }
+    return r === 'DEVELOPER' ? 'DEVELOPER' : 'USER';
+  }
+  return 'USER';
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -161,14 +179,8 @@ export class UsersService {
     const name = assertRegisterName(data.name);
     const hashed = await bcrypt.hash(password, 10);
     let role = 'USER';
-    if (actorRole === 'ADMIN') {
-      role = 'USER';
-    } else if (actorRole === 'DEVELOPER') {
-      const r = String(data.role || 'USER').toUpperCase();
-      if (r === 'ADMIN') {
-        throw new ForbiddenException('Developers não podem criar contas ADMIN.');
-      }
-      role = r === 'DEVELOPER' ? 'DEVELOPER' : 'USER';
+    if (canManageAllUsers(actorRole)) {
+      role = resolveManagedUserRole(actorRole, data.role);
     }
     return this.prisma.user.create({
       data: {
@@ -199,20 +211,8 @@ export class UsersService {
     if (data.name) updateData.name = assertRegisterName(data.name);
     if (data.email) updateData.email = normalizeEmail(data.email);
 
-    if (data.role !== undefined && data.role !== null && canManageAllUsers(actorRole)) {
-      if (actorRole === 'ADMIN') {
-        if (!isSelf) {
-          updateData.role = 'USER';
-        }
-      } else if (actorRole === 'DEVELOPER') {
-        const r = String(data.role).toUpperCase();
-        if (r === 'ADMIN') {
-          throw new ForbiddenException('Developers não podem atribuir papel ADMIN.');
-        }
-        if (r === 'USER' || r === 'DEVELOPER') {
-          updateData.role = r;
-        }
-      }
+    if (data.role !== undefined && data.role !== null && canManageAllUsers(actorRole) && !isSelf) {
+      updateData.role = resolveManagedUserRole(actorRole, data.role);
     }
 
     if (data.password && String(data.password).trim() !== '') {
