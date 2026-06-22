@@ -15,8 +15,8 @@ export class InstancesController {
   constructor(private readonly instancesService: InstancesService) {}
 
   @Get('user/:userId')
-  findByUser(@Req() req: any) {
-    return this.instancesService.findByUser(req.user.userId);
+  findAll() {
+    return this.instancesService.findAll();
   }
 
   @Post()
@@ -27,16 +27,16 @@ export class InstancesController {
   // ROTA QUE FALTAVA PARA O BOTÃO "LER QR CODE" FUNCIONAR!
   @Get('connect/:name')
   getQrCode(@Req() req: any, @Param('name') name: string) {
-    return this.instancesService.getQrCode(req.user.userId, name);
+    return this.instancesService.getQrCode(name);
   }
 
   @Put(':name/settings')
   updateSettings(@Req() req: any, @Param('name') name: string, @Body() data: any) {
-    return this.instancesService.updateSettings(req.user.userId, name, data);
+    return this.instancesService.updateSettings(name, data);
   }
 
   @Delete(':name')
   remove(@Req() req: any, @Param('name') name: string, @Body() body?: { reason?: string }) {
-    return this.instancesService.remove(req.user.userId, name, actorFromReq(req), body?.reason);
+    return this.instancesService.remove(name, actorFromReq(req), body?.reason);
   }
 }

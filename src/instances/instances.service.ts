@@ -46,16 +46,16 @@ export class InstancesService {
     };
   }
 
-  async findByUser(userId: string) {
-    const instances = await this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
-    
+  async findAll() {
+    const instances = await this.prisma.instance.findMany({ orderBy: { createdAt: 'desc' } });
+
     try {
       await Promise.allSettled(instances.map((inst) => this.checkStatus(inst.name)));
     } catch (e) {
       this.logger.warn('Não foi possível verificar o status das instâncias. Verifique as credenciais da API.');
     }
-    
-    const rows = await this.prisma.instance.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+
+    const rows = await this.prisma.instance.findMany({ orderBy: { createdAt: 'desc' } });
     return rows.map((row) => ({
       ...row,
       proxyPass: row.proxyPass ? maskSecret(row.proxyPass) : null,
@@ -145,7 +145,7 @@ export class InstancesService {
           proxyPort: input.proxyPort || null,
           proxyUser: data.proxyUser ? String(data.proxyUser) : null,
           proxyPass: data.proxyPass ? String(data.proxyPass) : null,
-          proxyProto: input.proxyProto,
+          proxyProto: input.proxyProto || null,
         },
       });
       return {
@@ -182,8 +182,8 @@ export class InstancesService {
     }
   }
 
-  async getQrCode(userId: string, instanceName: string) {
-    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+  async getQrCode(instanceName: string) {
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName } });
     try {
       const { evoUrl, evoKey } = await this.getEvolutionCredentials();
       const res = await axios.get(`${evoUrl}/instance/connect/${instanceName}`, { headers: { apikey: evoKey } });
@@ -194,8 +194,8 @@ export class InstancesService {
     }
   }
 
-  async updateSettings(userId: string, instanceName: string, data: any) {
-    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+  async updateSettings(instanceName: string, data: any) {
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName } });
     try {
       const { evoUrl, evoKey } = await this.getEvolutionCredentials();
       await axios.post(`${evoUrl}/settings/set/${instanceName}`, {
@@ -207,8 +207,8 @@ export class InstancesService {
     }
   }
 
-  async remove(userId: string, instanceName: string, actor: AuditActor, rawReason?: string) {
-    const inst = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+  async remove(instanceName: string, actor: AuditActor, rawReason?: string) {
+    const inst = await this.prisma.instance.findFirst({ where: { name: instanceName } });
     if (!inst) {
       throw new HttpException('Instância não encontrada.', HttpStatus.NOT_FOUND);
     }

@@ -73,17 +73,19 @@ export class WhatsappService {
     private instanceHealth: WhatsappInstanceHealthService,
   ) {}
 
-  async getInstancesHealthForUser(userId: string): Promise<InstanceHealthSnapshot[]> {
+  async getInstancesHealthForUser(_userId: string): Promise<InstanceHealthSnapshot[]> {
     const instances = await this.prisma.instance.findMany({
-      where: { userId },
       select: { name: true },
       orderBy: { createdAt: 'desc' },
     });
     return instances.map((i) => this.instanceHealth.getSnapshot(i.name));
   }
 
-  private async getDefaultInstanceName(userId: string): Promise<string> {
-    const inst = await this.prisma.instance.findFirst({ where: { status: 'connected', userId } });
+  private async getDefaultInstanceName(_userId: string): Promise<string> {
+    const inst = await this.prisma.instance.findFirst({
+      where: { status: 'connected' },
+      orderBy: { createdAt: 'desc' },
+    });
     if (!inst) throw new HttpException('Sem instância conectada.', HttpStatus.BAD_REQUEST);
     return inst.name;
   }
@@ -692,7 +694,7 @@ export class WhatsappService {
       throw new HttpException('Presença inválida.', HttpStatus.BAD_REQUEST);
     }
     const instanceName = requestedInstanceName || (await this.getDefaultInstanceName(userId));
-    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName } });
     if (!ownedInstance) {
       throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
     }
@@ -726,7 +728,7 @@ export class WhatsappService {
   async sendText(userId: string, number: string, text: string, requestedInstanceName?: string) {
     const safeText = assertBoundedText(text, 'Mensagem', WHATSAPP_MESSAGE_TEXT_MAX, { min: 1 });
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
-    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
     const contactKey = this.normalizeStoredContactKey(String(number ?? '').trim());
     const evoNumber = this.evolutionSendNumber(contactKey);
@@ -803,7 +805,7 @@ export class WhatsappService {
     const safeCaption =
       assertOptionalBoundedText(caption, 'Legenda', WHATSAPP_CAPTION_MAX) ?? '';
     const instanceName = requestedInstanceName || await this.getDefaultInstanceName(userId);
-    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName, userId } });
+    const ownedInstance = await this.prisma.instance.findFirst({ where: { name: instanceName } });
     if (!ownedInstance) throw new HttpException('Instância inválida.', HttpStatus.BAD_REQUEST);
     const contactKey = this.normalizeStoredContactKey(String(number ?? '').trim());
     const evoNumber = this.evolutionSendNumber(contactKey);
@@ -1145,7 +1147,7 @@ export class WhatsappService {
     }
 
     const instanceName = body.instanceName?.trim() || (await this.getDefaultInstanceName(userId));
-    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName } });
 
     const { baseUrl, apiKey } = await this.getEvolutionCreds();
     const payload: Record<string, unknown> = { subject, participants };
@@ -1215,7 +1217,7 @@ export class WhatsappService {
       );
     }
     const instanceName = body.instanceName?.trim() || (await this.getDefaultInstanceName(userId));
-    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName } });
 
     const existing = await this.prisma.contact.findUnique({
       where: { number_userId: { number: contactKey, userId } },
@@ -1420,7 +1422,7 @@ export class WhatsappService {
 
     const instanceName =
       dto.instanceName || msg.instanceName || (await this.getDefaultInstanceName(userId));
-    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName } });
 
     const remoteJid = this.buildRemoteJid(contactNumber);
     const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
@@ -1499,7 +1501,7 @@ export class WhatsappService {
 
     const instanceName =
       dto.instanceName || msg.instanceName || (await this.getDefaultInstanceName(userId));
-    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName, userId } });
+    await this.prisma.instance.findFirstOrThrow({ where: { name: instanceName } });
 
     const remoteJid = this.buildRemoteJid(contactNumber);
     const evoNumber = this.evolutionSendNumber(contactNumber);
