@@ -8,6 +8,7 @@ import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
 import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants';
 import type { AuditActor } from '../deletion-audit/delete-reason.util';
 import { extractInboundMessageContent, unwrapProtoMessage } from './whatsapp-inbound-extract';
+import { normalizeWebhookEvent } from '../common/evolution-webhook.util';
 import {
   assertBoundedText,
   assertOptionalBoundedText,
@@ -146,6 +147,20 @@ export class WhatsappService {
       select: { userId: true },
     });
     return instance?.userId || null;
+  }
+
+  /** Utilizadores que devem ver mensagens de uma instância partilhada (equipa). */
+  private async getInboundMessageUserIds(instanceName: string): Promise<string[]> {
+    const instance = await this.prisma.instance.findUnique({
+      where: { name: instanceName },
+      select: { userId: true },
+    });
+    if (!instance) return [];
+    const team = await this.prisma.user.findMany({
+      where: { approved: true, role: { in: ['ADMIN', 'USER'] } },
+      select: { id: true },
+    });
+    return [...new Set([instance.userId, ...team.map((u) => u.id)])];
   }
 
   private async fetchProfilePicture(number: string, instanceName: string): Promise<string | undefined> {
@@ -435,7 +450,7 @@ export class WhatsappService {
     }
 
     const instanceName = String(payload.instance || '');
-    const eventName = String(payload.event);
+    const eventName = normalizeWebhookEvent(payload.event);
 
     if (eventName === 'connection.update') {
       if (instanceName) {
@@ -454,8 +469,12 @@ export class WhatsappService {
     if (!allowedEvents.includes(eventName) || !payload.data) {
       return;
     }
-    const userId = await this.getUserIdFromInstance(instanceName);
-    if (!userId) return;
+    const userIds = await this.getInboundMessageUserIds(instanceName);
+    if (!userIds.length) {
+      this.logger.warn(`Webhook ignorado: instância "${instanceName}" não existe no CRM.`);
+      return;
+    }
+    const primaryUserId = userIds[0];
     const payloadData = payload.data;
     const msgData = Array.isArray(payloadData) ? payloadData[0] : payloadData;
     
@@ -468,7 +487,6 @@ export class WhatsappService {
     const contactNumber = this.contactKeyFromRemoteJid(remoteJid);
     const isFromMe = Boolean(msgData.key.fromMe);
     const waId = msgData.key.id ? String(msgData.key.id) : undefined;
-    const scopedWaId = waId ? this.buildScopedMessageId(userId, waId) : undefined;
     const participantJid = msgData.key?.participant ? String(msgData.key.participant) : '';
     const pushName = msgData.pushName ? String(msgData.pushName) : contactNumber;
     const groupSenderLabel =
@@ -480,8 +498,11 @@ export class WhatsappService {
             return tail || undefined;
           })()
         : undefined;
-
-    const msgExists = scopedWaId ? await this.prisma.message.findUnique({ where: { id: scopedWaId } }) : null;
+    const isSelfEchoEvent = eventName === 'send.message';
+    const primaryScopedWaId = waId ? this.buildScopedMessageId(primaryUserId, waId) : undefined;
+    const primaryMsgExists = primaryScopedWaId
+      ? await this.prisma.message.findUnique({ where: { id: primaryScopedWaId } })
+      : null;
 
     const msgRaw = msgData.message;
     if (!msgRaw || typeof msgRaw !== 'object' || Object.keys(msgRaw).length === 0) {
@@ -503,14 +524,9 @@ export class WhatsappService {
 
     if (extracted.isMedia && extracted.mediaObject) {
       // `send.message` é o eco de envios feitos por nós em `sendMedia`/`sendText`.
-      // O ficheiro já está no R2 e a linha em `messages` é (ou está prestes a ser) criada pelo serviço de envio.
-      // Baixar/subir aqui causa um segundo objeto duplicado no balde e uma linha extra de mensagem.
-      // → Para `send.message`, nunca descarregar a mídia; só reusar o que `msgExists` tiver.
-      const isSelfEcho = payload.event === 'send.message';
-
-      if (msgExists) {
-        mediaUrl = msgExists.mediaData || undefined;
-      } else if (!isSelfEcho) {
+      if (primaryMsgExists) {
+        mediaUrl = primaryMsgExists.mediaData || undefined;
+      } else if (!isSelfEchoEvent) {
         try {
           const { baseUrl: evoBaseUrl, apiKey: evoApiKey } = await this.getEvolutionCreds();
           const response = await axios.post(
@@ -521,8 +537,9 @@ export class WhatsappService {
 
           if (response.data && response.data.base64) {
             const buffer = Buffer.from(String(response.data.base64), 'base64');
-            const stableKey = scopedWaId || (waId ? `${userId}_${contactNumber}_${waId}` : undefined);
-            const mediaFolder = this.r2Service.conversasPath(userId, contactNumber);
+            const stableKey =
+              primaryScopedWaId || (waId ? `${primaryUserId}_${contactNumber}_${waId}` : undefined);
+            const mediaFolder = this.r2Service.conversasPath(primaryUserId, contactNumber);
             mediaUrl = await this.r2Service.uploadBuffer(
               buffer,
               fileName || 'arquivo.bin',
@@ -532,148 +549,142 @@ export class WhatsappService {
             );
           }
         } catch (error) {
-          this.logger.error("Erro ao baixar mídia da Evolution", error);
-          text = "Falha ao salvar mídia na nuvem";
+          this.logger.error('Erro ao baixar mídia da Evolution', error);
+          text = 'Falha ao salvar mídia na nuvem';
         }
       }
     }
 
-    if (!text && !isMedia) text = "Mensagem não suportada";
+    if (!text && !isMedia) text = 'Mensagem não suportada';
 
-    let notifyInboundPush = false;
-    let inboundPushPreview = '';
+    if (eventName === 'messages.upsert' || eventName === 'send.message') {
+      for (const userId of userIds) {
+        let notifyInboundPush = false;
+        let inboundPushPreview = '';
 
-    try {
-      if (payload.event === 'messages.upsert' || payload.event === 'send.message') {
-        const existingContact = await this.prisma.contact.findUnique({
-          where: { number_userId: { number: contactNumber, userId } },
-        });
-        let picUrl = existingContact?.profilePictureUrl || undefined;
-        
-        if (!picUrl) {
-          picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
-        }
+        try {
+          const scopedWaId = waId ? this.buildScopedMessageId(userId, waId) : undefined;
+          const msgExists = scopedWaId
+            ? await this.prisma.message.findUnique({ where: { id: scopedWaId } })
+            : null;
 
-        const finalSidebarText = text || fallbackSidebarText;
-
-        const needsGroupSubject =
-          isGroupJid &&
-          (!existingContact ||
-            this.shouldReplaceAutoGroupDisplayName(existingContact?.name, contactNumber));
-
-        let fetchedGroupSubject: string | undefined;
-        if (needsGroupSubject) {
-          fetchedGroupSubject = await this.tryFetchGroupSubject(instanceName, contactNumber, {
-            retries: 3,
+          const existingContact = await this.prisma.contact.findUnique({
+            where: { number_userId: { number: contactNumber, userId } },
           });
-        }
+          let picUrl = existingContact?.profilePictureUrl || undefined;
 
-        let newGroupResolvedName: string | undefined;
-        if (isGroupJid && !existingContact) {
-          const short = contactNumber.replace(/\D/g, '').slice(-6);
-          newGroupResolvedName = fetchedGroupSubject || `Grupo (${short})`;
-        }
+          if (!picUrl) {
+            picUrl = await this.fetchProfilePicture(contactNumber, instanceName);
+          }
 
-        const groupNameUpdate: Record<string, string> =
-          isGroupJid &&
-          existingContact &&
-          this.shouldReplaceAutoGroupDisplayName(existingContact.name, contactNumber) &&
-          fetchedGroupSubject
-            ? { name: fetchedGroupSubject }
-            : {};
+          const finalSidebarText = text || fallbackSidebarText;
 
-        await this.prisma.contact.upsert({
-          where: { number_userId: { number: contactNumber, userId } },
-          update: { 
-            lastMessage: finalSidebarText, 
-            lastMessageTime: new Date(), 
-            instanceName, 
-            ...(picUrl && { profilePictureUrl: picUrl }),
-            ...groupNameUpdate,
-          },
-          create: { 
-            userId,
-            number: contactNumber, 
-            name: isGroupJid ? newGroupResolvedName ?? 'Grupo' : pushName || contactNumber,
-            lastMessage: finalSidebarText, 
-            instanceName, 
-            profilePictureUrl: picUrl || null,
-          },
-        });
+          const needsGroupSubject =
+            isGroupJid &&
+            (!existingContact ||
+              this.shouldReplaceAutoGroupDisplayName(existingContact?.name, contactNumber));
 
-        if (needsGroupSubject && !fetchedGroupSubject) {
-          const inst = instanceName;
-          const cn = contactNumber;
-          const uid = userId;
-          setTimeout(() => void this.retryResolveGroupSubjectIfPlaceholder(uid, inst, cn), 5000);
-        }
-
-        // Em `send.message` (eco do nosso próprio envio) a linha é criada por sendMedia/sendText.
-        // Tentar criar aqui de novo causaria P2002 ou (pior) sobrescrever com mediaData=null.
-        const isSelfEchoEvent = payload.event === 'send.message';
-        if (scopedWaId && !msgExists && !isSelfEchoEvent) {
-          try {
-            await this.prisma.message.create({
-              data: { 
-                id: scopedWaId,
-                userId,
-                instanceName, 
-                contactNumber, 
-                text,
-                type: isFromMe ? 'sent' : 'received', 
-                timestamp: new Date(),
-                isMedia,           
-                mediaData: mediaUrl || null, 
-                mimeType: mimeType || null,          
-                fileName: fileName || null,
-                groupSenderLabel: groupSenderLabel || null,
-                messageKind: extracted.messageKind,
-              },
+          let fetchedGroupSubject: string | undefined;
+          if (needsGroupSubject) {
+            fetchedGroupSubject = await this.tryFetchGroupSubject(instanceName, contactNumber, {
+              retries: 3,
             });
-            if (!isFromMe && payload.event === 'messages.upsert') {
-              notifyInboundPush = true;
-              inboundPushPreview = String(finalSidebarText).slice(0, 200);
-            }
-          } catch (e: any) {
-            if (e?.code === 'P2002') {
-              this.logger.warn(`Mensagem duplicada ignorada (idempotência): ${scopedWaId}`);
-            } else {
-              throw e;
+          }
+
+          let newGroupResolvedName: string | undefined;
+          if (isGroupJid && !existingContact) {
+            const short = contactNumber.replace(/\D/g, '').slice(-6);
+            newGroupResolvedName = fetchedGroupSubject || `Grupo (${short})`;
+          }
+
+          const groupNameUpdate: Record<string, string> =
+            isGroupJid &&
+            existingContact &&
+            this.shouldReplaceAutoGroupDisplayName(existingContact.name, contactNumber) &&
+            fetchedGroupSubject
+              ? { name: fetchedGroupSubject }
+              : {};
+
+          await this.prisma.contact.upsert({
+            where: { number_userId: { number: contactNumber, userId } },
+            update: {
+              lastMessage: finalSidebarText,
+              lastMessageTime: new Date(),
+              instanceName,
+              ...(picUrl && { profilePictureUrl: picUrl }),
+              ...groupNameUpdate,
+            },
+            create: {
+              userId,
+              number: contactNumber,
+              name: isGroupJid ? newGroupResolvedName ?? 'Grupo' : pushName || contactNumber,
+              lastMessage: finalSidebarText,
+              instanceName,
+              profilePictureUrl: picUrl || null,
+            },
+          });
+
+          if (needsGroupSubject && !fetchedGroupSubject) {
+            const inst = instanceName;
+            const cn = contactNumber;
+            const uid = userId;
+            setTimeout(() => void this.retryResolveGroupSubjectIfPlaceholder(uid, inst, cn), 5000);
+          }
+
+          if (scopedWaId && !msgExists && !isSelfEchoEvent) {
+            try {
+              await this.prisma.message.create({
+                data: {
+                  id: scopedWaId,
+                  userId,
+                  instanceName,
+                  contactNumber,
+                  text,
+                  type: isFromMe ? 'sent' : 'received',
+                  timestamp: new Date(),
+                  isMedia,
+                  mediaData: mediaUrl || null,
+                  mimeType: mimeType || null,
+                  fileName: fileName || null,
+                  groupSenderLabel: groupSenderLabel || null,
+                  messageKind: extracted.messageKind,
+                },
+              });
+              if (!isFromMe && eventName === 'messages.upsert') {
+                notifyInboundPush = true;
+                inboundPushPreview = String(finalSidebarText).slice(0, 200);
+              }
+            } catch (e: any) {
+              if (e?.code === 'P2002') {
+                this.logger.warn(`Mensagem duplicada ignorada (idempotência): ${scopedWaId}`);
+              } else {
+                throw e;
+              }
             }
           }
-        }
-        
-        if (picUrl) {
-          msgData.profilePictureUrl = picUrl;
-        }
-        if (groupSenderLabel) {
-          msgData.groupSenderLabel = groupSenderLabel;
-        }
 
-        if (isMedia) {
-          msgData.customMedia = { isMedia, mediaData: mediaUrl, mimeType, fileName, text };
+          this.messageSubject.next({ ...payload, event: eventName, _crmUserId: userId });
+
+          if (notifyInboundPush) {
+            const row = await this.prisma.contact.findUnique({
+              where: { number_userId: { number: contactNumber, userId } },
+              select: { name: true },
+            });
+            const title = row?.name?.trim() || (isGroupJid ? 'Grupo WhatsApp' : pushName);
+            const preview =
+              (isGroupJid && groupSenderLabel ? `${groupSenderLabel}: ` : '') + inboundPushPreview;
+            void this.pushNotifications.notifyWhatsappInbound(userId, {
+              contactName: title,
+              contactNumber,
+              preview,
+            });
+          }
+        } catch (e) {
+          this.logger.error(`Erro no processamento do Webhook (userId=${userId})`, e);
         }
-        msgData.crmMessageKind = extracted.messageKind;
       }
-
-      this.messageSubject.next({ ...payload, _crmUserId: userId });
-
-      if (notifyInboundPush) {
-        const row = await this.prisma.contact.findUnique({
-          where: { number_userId: { number: contactNumber, userId } },
-          select: { name: true },
-        });
-        const title = row?.name?.trim() || (isGroupJid ? 'Grupo WhatsApp' : pushName);
-        const preview =
-          (isGroupJid && groupSenderLabel ? `${groupSenderLabel}: ` : '') + inboundPushPreview;
-        void this.pushNotifications.notifyWhatsappInbound(userId, {
-          contactName: title,
-          contactNumber,
-          preview,
-        });
-      }
-    } catch (e) {
-      this.logger.error("Erro no processamento do Webhook", e);
+    } else {
+      this.messageSubject.next({ ...payload, event: eventName, _crmUserId: primaryUserId });
     }
   }
 

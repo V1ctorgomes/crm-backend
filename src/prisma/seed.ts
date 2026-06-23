@@ -9,9 +9,17 @@ const SEED_USERS = [
   { email: 'developer@crm.com', name: 'Developer', role: 'DEVELOPER' },
 ] as const;
 
+function isSeedAllowed(): boolean {
+  if (process.env.NODE_ENV !== 'production') return true;
+  return process.env.ALLOW_SEED?.trim().toLowerCase() === 'true';
+}
+
 async function main() {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('Seed bloqueado em produção (contém palavras-passe de exemplo).');
+  if (!isSeedAllowed()) {
+    console.error(
+      'Seed bloqueado em produção. Use no console: NODE_ENV=development npx prisma db seed',
+    );
+    console.error('Ou defina ALLOW_SEED=true nas variáveis do serviço (remova depois).');
     process.exit(1);
   }
 
@@ -50,7 +58,7 @@ async function main() {
     });
   }
 
-  console.log('✅ Seed: 3 utilizadores (USER, ADMIN, DEVELOPER) — palavra-passe: 12345678');
+  console.log('✅ Seed concluído: 3 utilizadores (USER, ADMIN, DEVELOPER).');
   for (const u of SEED_USERS) {
     console.log(`   • ${u.role.padEnd(9)} ${u.email}`);
   }

@@ -6,6 +6,7 @@ import { DeletionResourceType } from '../deletion-audit/deletion-audit.constants
 import type { AuditActor } from '../deletion-audit/delete-reason.util';
 import { sanitizeInstanceCreate, sanitizeInstanceName } from './instances.validation';
 import { maskSecret } from '../common/mask-secret';
+import { buildEvolutionWebhookConfig } from '../common/evolution-webhook.util';
 
 @Injectable()
 export class InstancesService {
@@ -14,14 +15,36 @@ export class InstancesService {
   // O webhookUrl mantém-se no .env pois é o endereço do próprio CRM
   private readonly webhookUrl = process.env.WEBHOOK_URL;
 
-  /** Anexa `?token=` se existir WHATSAPP_WEBHOOK_SECRET (validação no POST /whatsapp/webhook). */
-  private buildWebhookUrlForEvolution(): string | undefined {
-    const base = this.webhookUrl?.trim();
-    if (!base) return undefined;
-    const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
-    if (!secret || base.includes('token=')) return base;
-    const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}token=${encodeURIComponent(secret)}`;
+  private async applyEvolutionWebhook(instanceName: string): Promise<void> {
+    const webhook = buildEvolutionWebhookConfig();
+    if (!webhook) {
+      this.logger.warn('WEBHOOK_URL não definido; webhook da Evolution não foi configurado.');
+      return;
+    }
+    const { evoUrl, evoKey } = await this.getEvolutionCredentials();
+    await axios.post(
+      `${evoUrl}/webhook/set/${encodeURIComponent(instanceName)}`,
+      { webhook },
+      { headers: { apikey: evoKey } },
+    );
+    this.logger.log(`Webhook CRM aplicado na instância ${instanceName}.`);
+  }
+
+  async syncAllWebhooks(): Promise<{ synced: string[]; failed: { name: string; error: string }[] }> {
+    const instances = await this.prisma.instance.findMany({ select: { name: true }, orderBy: { createdAt: 'desc' } });
+    const synced: string[] = [];
+    const failed: { name: string; error: string }[] = [];
+    for (const inst of instances) {
+      try {
+        await this.applyEvolutionWebhook(inst.name);
+        synced.push(inst.name);
+      } catch (e: any) {
+        const msg = e?.response?.data?.message || e?.message || 'Erro desconhecido';
+        failed.push({ name: inst.name, error: String(msg) });
+        this.logger.warn(`Falha ao sincronizar webhook (${inst.name}): ${msg}`);
+      }
+    }
+    return { synced, failed };
   }
 
   constructor(
@@ -114,24 +137,13 @@ export class InstancesService {
       }
 
       // 4. Configuração do Webhook
-      const webhookUrlResolved = this.buildWebhookUrlForEvolution();
-      if (webhookUrlResolved) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        await axios.post(`${evoUrl}/webhook/set/${encodeURIComponent(input.name)}`, {
-          webhook: {
-            enabled: true,
-            url: webhookUrlResolved,
-            byEvents: false, 
-            base64: false,
-            events: [
-              "MESSAGES_UPSERT",
-              "MESSAGES_UPDATE",
-              "MESSAGES_DELETE",
-              "SEND_MESSAGE",
-              "CONNECTION_UPDATE"
-            ]
-          }
-        }, { headers: { apikey: evoKey } }).catch(e => this.logger.warn(`Erro no webhook (ignorado): ${e.message}`));
+      if (this.webhookUrl?.trim()) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        try {
+          await this.applyEvolutionWebhook(input.name);
+        } catch (e: any) {
+          this.logger.warn(`Erro ao configurar webhook (ignorado): ${e?.message ?? e}`);
+        }
       }
 
       // 5. Salvar no Banco de Dados

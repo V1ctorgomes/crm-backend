@@ -35,6 +35,12 @@ export class InstancesController {
     return this.instancesService.updateSettings(name, data);
   }
 
+  @Post('sync-webhooks')
+  @Roles('ADMIN', 'DEVELOPER')
+  syncWebhooks() {
+    return this.instancesService.syncAllWebhooks();
+  }
+
   @Delete(':name')
   remove(@Req() req: any, @Param('name') name: string, @Body() body?: { reason?: string }) {
     return this.instancesService.remove(name, actorFromReq(req), body?.reason);

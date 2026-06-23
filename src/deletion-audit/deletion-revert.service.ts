@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeletionResourceType } from './deletion-audit.constants';
+import { buildEvolutionWebhookConfig } from '../common/evolution-webhook.util';
 
 /** Janela em que o admin pode reverter uma exclusão auditada (qualquer perfil que a tenha feito). */
 export const DELETION_REVERT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -437,12 +438,7 @@ export class DeletionRevertService {
   }
 
   private buildWebhookUrlForEvolution(): string | undefined {
-    const base = process.env.WEBHOOK_URL?.trim();
-    if (!base) return undefined;
-    const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
-    if (!secret || base.includes('token=')) return base;
-    const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}token=${encodeURIComponent(secret)}`;
+    return buildEvolutionWebhookConfig()?.url;
   }
 
   /**
@@ -529,29 +525,11 @@ export class DeletionRevertService {
         }
       }
 
-      const webhookUrlResolved = this.buildWebhookUrlForEvolution();
-      if (webhookUrlResolved) {
+      const webhook = buildEvolutionWebhookConfig();
+      if (webhook) {
         await new Promise((r) => setTimeout(r, 1500));
         await axios
-          .post(
-            `${evoUrl}/webhook/set/${name}`,
-            {
-              webhook: {
-                enabled: true,
-                url: webhookUrlResolved,
-                byEvents: false,
-                base64: false,
-                events: [
-                  'MESSAGES_UPSERT',
-                  'MESSAGES_UPDATE',
-                  'MESSAGES_DELETE',
-                  'SEND_MESSAGE',
-                  'CONNECTION_UPDATE',
-                ],
-              },
-            },
-            { headers: { 'Content-Type': 'application/json', ...evoHeaders } },
-          )
+          .post(`${evoUrl}/webhook/set/${name}`, { webhook }, { headers: { 'Content-Type': 'application/json', ...evoHeaders } })
           .catch((e) => this.logger.warn(`Webhook ao restaurar instância (ignorado): ${String(e)}`));
       }
 
