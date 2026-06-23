@@ -1,8 +1,13 @@
-// O '../' sobe para 'src', o outro '../' sobe para a raiz, e depois entra em 'generated'
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
+
+const SEED_USERS = [
+  { email: 'user@crm.com', name: 'Atendimento', role: 'USER' },
+  { email: 'admin@crm.com', name: 'Administrador', role: 'ADMIN' },
+  { email: 'developer@crm.com', name: 'Developer', role: 'DEVELOPER' },
+] as const;
 
 async function main() {
   if (process.env.NODE_ENV === 'production') {
@@ -10,31 +15,26 @@ async function main() {
     process.exit(1);
   }
 
-  const password = await bcrypt.hash('123456', 10);
-  
-  await prisma.user.upsert({
-    where: { email: 'admin@crm.com' },
-    update: { role: 'ADMIN', approved: true },
-    create: {
-      email: 'admin@crm.com',
-      name: 'Admin',
-      password: password,
-      role: 'ADMIN',
-      approved: true,
-    },
-  });
+  const password = await bcrypt.hash('12345678', 10);
 
-  await prisma.user.upsert({
-    where: { email: 'admindois@crm.com' },
-    update: { role: 'DEVELOPER', approved: true },
-    create: {
-      email: 'admindois@crm.com',
-      name: 'Admin Dois',
-      password: password,
-      role: 'DEVELOPER',
-      approved: true,
-    },
-  });
+  for (const u of SEED_USERS) {
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: {
+        name: u.name,
+        role: u.role,
+        password,
+        approved: true,
+      },
+      create: {
+        email: u.email,
+        name: u.name,
+        password,
+        role: u.role,
+        approved: true,
+      },
+    });
+  }
 
   const catalogDefaults: { category: string; label: string; sortOrder: number }[] = [
     { category: 'MARCA', label: 'Outras', sortOrder: 1 },
@@ -50,7 +50,10 @@ async function main() {
     });
   }
 
-  console.log('✅ Seed executado com sucesso a partir de src/prisma!..');
+  console.log('✅ Seed: 3 utilizadores (USER, ADMIN, DEVELOPER) — palavra-passe: 12345678');
+  for (const u of SEED_USERS) {
+    console.log(`   • ${u.role.padEnd(9)} ${u.email}`);
+  }
 }
 
 main()
