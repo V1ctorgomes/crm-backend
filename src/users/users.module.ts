@@ -1,15 +1,34 @@
 import { Module } from '@nestjs/common';
+
 import { UsersService } from './users.service';
+
+import { UsersAdminService } from './users-admin.service';
+
+import { UsersProfileService } from './users-profile.service';
+
 import { UsersController } from './users.controller';
+
 import { PrismaModule } from '../prisma/prisma.module';
-import { R2Service } from '../whatsapp/r2.service';
+
+import { StorageModule } from '../storage/storage.module';
+
 import { AuthModule } from '../auth/auth.module';
+
 import { DeletionAuditModule } from '../deletion-audit/deletion-audit.module';
 
+
+
 @Module({
-  imports: [PrismaModule, AuthModule, DeletionAuditModule],
+
+  imports: [PrismaModule, AuthModule, DeletionAuditModule, StorageModule],
+
   controllers: [UsersController],
-  providers: [UsersService, R2Service], // Adicionado o R2Service aqui
+
+  providers: [UsersService, UsersAdminService, UsersProfileService],
+
   exports: [UsersService],
+
 })
+
 export class UsersModule {}
+
