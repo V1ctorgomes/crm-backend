@@ -5,12 +5,13 @@ export function canManageAllUsers(role: string): boolean {
 }
 
 /** Papéis que ADMIN ou DEVELOPER podem atribuir a outros utilizadores. */
-export function resolveManagedUserRole(actorRole: string, requestedRole: unknown): 'USER' | 'DEVELOPER' {
+export function resolveManagedUserRole(
+  actorRole: string,
+  requestedRole: unknown,
+): 'USER' | 'DEVELOPER' | 'ADMIN' {
   const r = String(requestedRole || 'USER').toUpperCase();
   if (actorRole === 'DEVELOPER') {
-    if (r === 'ADMIN') {
-      throw new ForbiddenException('Developers não podem atribuir papel ADMIN.');
-    }
+    if (r === 'ADMIN') return 'ADMIN';
     return r === 'DEVELOPER' ? 'DEVELOPER' : 'USER';
   }
   if (actorRole === 'ADMIN') {
