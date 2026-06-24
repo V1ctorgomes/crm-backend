@@ -34,6 +34,10 @@ import { WhatsappTextSendService } from './whatsapp-text-send.service';
 
 import { WhatsappMediaSendService } from './whatsapp-media-send.service';
 
+import { WhatsappEvolutionMediaSendService } from './whatsapp-evolution-media-send.service';
+
+import { WhatsappMediaPersistService } from './whatsapp-media-persist.service';
+
 import { WhatsappContactsService } from './whatsapp-contacts.service';
 
 import { ContactsListService } from './contacts-list.service';
@@ -93,6 +97,10 @@ import { DeletionAuditModule } from '../deletion-audit/deletion-audit.module';
     WhatsappTextSendService,
 
     WhatsappMediaSendService,
+
+    WhatsappEvolutionMediaSendService,
+
+    WhatsappMediaPersistService,
 
     WhatsappContactsService,
 

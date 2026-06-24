@@ -2,7 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { R2Service } from '../storage/r2.service';
-import { sanitizeAndAssertUpdateTicket } from './ticket-create.validation';
+import { sanitizeAndAssertUpdateTicket } from './ticket-update.validation';
 import { assertResolutionReasonWhenArchiving } from './ticket-resolution.validation';
 import { TicketCatalogService } from '../ticket-catalog/ticket-catalog.service';
 import { DeletionAuditService } from '../deletion-audit/deletion-audit.service';
