@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { decryptField } from '../common/field-crypto';
 
 @Injectable()
 export class WhatsappEvolutionCredentialsService {
@@ -17,7 +18,7 @@ export class WhatsappEvolutionCredentialsService {
     const envUrl = String(process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
     const envKey = String(process.env.EVOLUTION_API_KEY || '');
     const baseUrl = (provider?.baseUrl?.replace(/\/$/, '') || envUrl).trim();
-    const apiKey = (provider?.apiKey || envKey).trim();
+    const apiKey = (decryptField(provider?.apiKey) || envKey).trim();
     if (!baseUrl || !apiKey) {
       throw new HttpException(
         'Evolution API não configurada. Configure em Developer → Provedores.',

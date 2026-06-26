@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { encryptField, decryptField } from '../common/field-crypto';
 import { maskSecret } from '../common/mask-secret';
 import { sanitizeProxyInput } from './proxies.validation';
 
@@ -22,7 +23,7 @@ function toPublicProxy(row: {
     username: row.username,
     protocol: row.protocol,
     passwordSet: Boolean(row.password),
-    password: maskSecret(row.password),
+    password: maskSecret(row.password ? decryptField(row.password) : null),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -40,7 +41,7 @@ export class ProxiesService {
         host: input.host,
         port: input.port,
         username: input.username,
-        password: input.password,
+        password: input.password ? encryptField(input.password) : null,
         protocol: input.protocol,
       },
     });

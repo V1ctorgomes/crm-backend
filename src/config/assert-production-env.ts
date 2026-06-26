@@ -36,4 +36,11 @@ export function assertProductionEnvOrThrow(): void {
   if (!process.env.DATABASE_URL?.trim()) {
     throw new Error('Em produção defina DATABASE_URL.');
   }
+
+  const fieldKey = process.env.FIELD_ENCRYPTION_KEY?.trim();
+  if (!fieldKey || fieldKey.length < 32) {
+    throw new Error(
+      'Em produção defina FIELD_ENCRYPTION_KEY com pelo menos 32 caracteres (ex.: openssl rand -base64 48).',
+    );
+  }
 }

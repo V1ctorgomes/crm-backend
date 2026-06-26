@@ -15,30 +15,33 @@ export class InstancesController {
   constructor(private readonly instancesService: InstancesService) {}
 
   @Get('user/:userId')
-  findAll() {
-    return this.instancesService.findAll();
+  findAll(@Req() req: { user: { userId: string } }, @Param('userId') userId: string) {
+    return this.instancesService.findAllForUser(req.user.userId, userId);
   }
 
   @Post()
-  create(@Req() req: any, @Body() data: any) {
+  create(@Req() req: { user: { userId: string } }, @Body() data: Record<string, unknown>) {
     return this.instancesService.create(req.user.userId, data);
   }
 
-  // ROTA QUE FALTAVA PARA O BOTÃO "LER QR CODE" FUNCIONAR!
   @Get('connect/:name')
-  getQrCode(@Req() req: any, @Param('name') name: string) {
-    return this.instancesService.getQrCode(name);
+  getQrCode(@Req() req: { user: { userId: string } }, @Param('name') name: string) {
+    return this.instancesService.getQrCode(req.user.userId, name);
   }
 
   @Put(':name/settings')
-  updateSettings(@Req() req: any, @Param('name') name: string, @Body() data: any) {
-    return this.instancesService.updateSettings(name, data);
+  updateSettings(
+    @Req() req: { user: { userId: string } },
+    @Param('name') name: string,
+    @Body() data: Record<string, unknown>,
+  ) {
+    return this.instancesService.updateSettings(req.user.userId, name, data);
   }
 
   @Post('sync-webhooks')
   @Roles('ADMIN', 'DEVELOPER')
-  syncWebhooks() {
-    return this.instancesService.syncAllWebhooks();
+  syncWebhooks(@Req() req: { user: { role: string } }) {
+    return this.instancesService.syncAllWebhooks(req.user.role);
   }
 
   @Delete(':name')

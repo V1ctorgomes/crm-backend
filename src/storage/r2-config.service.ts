@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { S3Client } from '@aws-sdk/client-s3';
 import { PrismaService } from '../prisma/prisma.service';
+import { decryptField } from '../common/field-crypto';
 
 export type R2ResolvedConfig = {
   endpoint: string;
@@ -34,8 +35,8 @@ export class R2ConfigService {
 
     const p = await this.prisma.provider.findUnique({ where: { name: 'cloudflare' } });
     if (!p) return null;
-    const accessKeyId = t(p.apiKey);
-    const secretAccessKey = t(p.apiToken);
+    const accessKeyId = t(decryptField(p.apiKey));
+    const secretAccessKey = t(decryptField(p.apiToken));
     const bucket = t(p.bucket);
     const publicUrl = t(p.baseUrl).replace(/\/+$/, '');
     const accountId = t(p.accountId);

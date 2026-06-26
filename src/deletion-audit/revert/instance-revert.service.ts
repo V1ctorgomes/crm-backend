@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import axios from 'axios';
 import { buildEvolutionWebhookConfig } from '../../common/evolution-webhook.util';
+import { decryptField, encryptField } from '../../common/field-crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { asObj } from './revert-snapshot.util';
 
@@ -21,7 +22,7 @@ export class InstanceRevertService {
     }
     return {
       evoUrl: provider.baseUrl.replace(/\/$/, ''),
-      evoKey: provider.apiKey,
+      evoKey: decryptField(provider.apiKey) ?? '',
     };
   }
 
@@ -71,7 +72,8 @@ export class InstanceRevertService {
     const proxyHost = s.proxyHost == null ? null : String(s.proxyHost).trim() || null;
     const proxyPort = s.proxyPort == null ? null : String(s.proxyPort).trim() || null;
     const proxyUser = s.proxyUser == null ? null : String(s.proxyUser).trim() || null;
-    const proxyPass = s.proxyPass == null ? null : String(s.proxyPass).trim() || null;
+    const proxyPassRaw = s.proxyPass == null ? null : String(s.proxyPass).trim() || null;
+    const proxyPass = proxyPassRaw ? decryptField(proxyPassRaw) : null;
     const proxyProto = (s.proxyProto == null ? 'http' : String(s.proxyProto)).toLowerCase().trim() || 'http';
 
     const { evoUrl, evoKey } = await this.getEvolutionCredentials();
@@ -140,7 +142,7 @@ export class InstanceRevertService {
             proxyHost,
             proxyPort,
             proxyUser,
-            proxyPass,
+            proxyPass: proxyPass ? encryptField(proxyPass) : null,
             proxyProto,
           },
         });

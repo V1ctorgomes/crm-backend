@@ -16,6 +16,7 @@ import { ProxiesModule } from './proxies/proxies.module';
 import { ProvidersModule } from './providers/providers.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ReportsModule } from './reports/reports.module';
     ProxiesModule,
     ProvidersModule,
     ReportsModule,
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [

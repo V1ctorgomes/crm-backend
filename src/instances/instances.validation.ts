@@ -13,25 +13,27 @@ export function sanitizeInstanceName(raw: unknown): string {
   return name;
 }
 
-export function sanitizeInstanceCreate(data: Record<string, unknown>) {
+export type SanitizedInstanceCreate = {
+  name: string;
+  proxyId: string | null;
+};
+
+export function sanitizeInstanceCreate(data: Record<string, unknown>): SanitizedInstanceCreate {
   const name = sanitizeInstanceName(data.name);
-  const proxyHost = data.proxyHost != null ? String(data.proxyHost).trim() : '';
-  const proxyPort = data.proxyPort != null ? String(data.proxyPort).trim() : '';
-  const hasProxy = Boolean(proxyHost || proxyPort);
-  if (proxyHost && !proxyPort) {
-    throw new BadRequestException('Porta da proxy é obrigatória quando o host é informado.');
+
+  if (data.proxyHost != null || data.proxyPort != null || data.proxyPass != null || data.proxyUser != null) {
+    throw new BadRequestException(
+      'Credenciais de proxy não podem ser enviadas pelo cliente. Selecione uma proxy registada (proxyId).',
+    );
   }
-  if (!proxyHost && proxyPort) {
-    throw new BadRequestException('Host da proxy é obrigatório quando a porta é informada.');
-  }
-  let proxyProto: string | null = null;
-  if (hasProxy) {
-    proxyProto = String(data.proxyProto ?? 'http').toLowerCase();
-    if (proxyProto !== 'http' && proxyProto !== 'https' && proxyProto !== 'socks5') {
-      throw new BadRequestException('Protocolo de proxy inválido.');
-    }
-  }
-  return { name, proxyHost, proxyPort, proxyProto };
+
+  const proxyIdRaw = data.proxyId;
+  const proxyId =
+    proxyIdRaw != null && String(proxyIdRaw).trim() !== ''
+      ? assertUuidParam(proxyIdRaw, 'Proxy')
+      : null;
+
+  return { name, proxyId };
 }
 
 export function assertUserIdParam(raw: unknown): string {

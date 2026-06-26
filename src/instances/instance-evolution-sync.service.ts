@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
+import { decryptField } from '../common/field-crypto';
 import { buildEvolutionWebhookConfig } from '../common/evolution-webhook.util';
 
 @Injectable()
@@ -22,7 +23,7 @@ export class InstanceEvolutionSyncService {
 
     return {
       evoUrl: provider.baseUrl.replace(/\/$/, ''),
-      evoKey: provider.apiKey,
+      evoKey: decryptField(provider.apiKey) ?? '',
     };
   }
 

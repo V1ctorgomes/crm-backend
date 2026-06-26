@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { decryptField, encryptField } from '../common/field-crypto';
 import { maskSecret } from '../common/mask-secret';
 import {
   assertProviderName,
@@ -24,8 +25,8 @@ function toPublicProvider(row: {
     accountId: row.accountId,
     apiKeySet: Boolean(row.apiKey),
     apiTokenSet: Boolean(row.apiToken),
-    apiKey: maskSecret(row.apiKey),
-    apiToken: maskSecret(row.apiToken),
+    apiKey: maskSecret(row.apiKey ? decryptField(row.apiKey) : null),
+    apiToken: maskSecret(row.apiToken ? decryptField(row.apiToken) : null),
   };
 }
 
@@ -69,7 +70,7 @@ export class ProvidersService {
       data: {
         name: providerName,
         baseUrl,
-        apiKey: dataToWrite.apiKey,
+        apiKey: dataToWrite.apiKey!,
         apiToken: dataToWrite.apiToken,
         bucket: dataToWrite.bucket,
         region: dataToWrite.region,
@@ -94,9 +95,9 @@ function buildProviderWrite(
   const out: Record<string, string | undefined> = {};
   if (patch.baseUrl !== undefined) out.baseUrl = patch.baseUrl;
   else if (existing?.baseUrl) out.baseUrl = existing.baseUrl;
-  if (patch.apiKey !== undefined) out.apiKey = patch.apiKey;
+  if (patch.apiKey !== undefined) out.apiKey = encryptField(patch.apiKey) ?? undefined;
   else if (existing?.apiKey) out.apiKey = existing.apiKey;
-  if (patch.apiToken !== undefined) out.apiToken = patch.apiToken;
+  if (patch.apiToken !== undefined) out.apiToken = encryptField(patch.apiToken) ?? undefined;
   else if (existing?.apiToken) out.apiToken = existing.apiToken;
   if (patch.bucket !== undefined) out.bucket = patch.bucket;
   else if (existing?.bucket) out.bucket = existing.bucket ?? undefined;
